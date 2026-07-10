@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { LogOut, Download, Map, RefreshCw, Clock } from 'lucide-react'
+import { LogOut, Download, Map, RefreshCw, Clock, ExternalLink } from 'lucide-react'
 import { CREW } from '../lib/data'
 import { useManagerShifts, useLiveLocations, Shift } from '../lib/useShifts'
 import { formatTime, formatDuration, todayStr } from '../lib/data'
@@ -13,18 +13,19 @@ export function ManagerDashboard({ onLogout }: Props) {
   const { shifts, loading }   = useManagerShifts(date)
   const liveLocations         = useLiveLocations()
 
-  // KPIs
   const onClock    = shifts.filter(s => s.clockOut === null).length
-  const totalHours = shifts.filter(s => s.durationMinutes !== null)
+  const totalHours = shifts
+    .filter(s => s.durationMinutes !== null)
     .reduce((sum, s) => sum + (s.durationMinutes ?? 0), 0) / 60
 
   function statusForCrew(name: string) {
     const live = liveLocations.find(l => l.userName === name)
     const open = shifts.find(s => s.crewName === name && s.clockOut === null)
-    if (live && live.active) return { label: 'On Clock', color: '#16a34a', property: live.currentProperty }
-    if (open)                return { label: 'On Clock', color: '#16a34a', property: open.property }
-    if (shifts.some(s => s.crewName === name)) return { label: 'Done', color: '#6b7280', property: null }
-    return { label: 'Not In', color: '#dc2626', property: null }
+    if (live?.active)  return { label: 'On Clock',    color: '#16a34a', property: live.currentProperty }
+    if (open)          return { label: 'On Clock',    color: '#16a34a', property: open.property }
+    if (shifts.some(s => s.crewName === name))
+                       return { label: 'Done',        color: '#6b7280', property: null }
+    return             { label: 'Not In',             color: '#dc2626', property: null }
   }
 
   function hoursToday(name: string) {
@@ -46,8 +47,8 @@ export function ManagerDashboard({ onLogout }: Props) {
       s.note,
     ]))
     const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n')
-    const a   = document.createElement('a')
-    a.href    = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv)
+    const a = document.createElement('a')
+    a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv)
     a.download = `timeclock-${date}.csv`
     a.click()
   }
@@ -75,7 +76,7 @@ export function ManagerDashboard({ onLogout }: Props) {
           </div>
           <div className="flex gap-2">
             <button onClick={() => setShowMap(true)}
-              className="h-11 px-4 rounded-xl bg-white/20 active:bg-white/30 flex items-center gap-1.5 font-semibold text-sm touch-manipulation">
+              className="h-11 px-3 rounded-xl bg-white/20 active:bg-white/30 flex items-center gap-1.5 font-semibold text-sm touch-manipulation">
               <Map size={16} color="white" />
               <span className="text-white">Map</span>
             </button>
@@ -89,9 +90,9 @@ export function ManagerDashboard({ onLogout }: Props) {
         {/* KPI strip */}
         <div className="grid grid-cols-3 gap-3 mt-4">
           {[
-            { label: 'On Clock',    value: `${onClock}/5`,           color: '#4ade80' },
+            { label: 'On Clock',    value: `${onClock}/5`,              color: '#4ade80' },
             { label: 'Hours Today', value: `${totalHours.toFixed(1)}h`, color: '#60a5fa' },
-            { label: 'Late',        value: `${late.length}`,          color: late.length > 0 ? '#f87171' : '#9ca3af' },
+            { label: 'Late',        value: `${late.length}`,            color: late.length > 0 ? '#f87171' : '#9ca3af' },
           ].map(k => (
             <div key={k.label} className="bg-white/10 rounded-2xl px-3 py-3 text-center">
               <div className="text-2xl font-bold" style={{ color: k.color }}>{k.value}</div>
@@ -103,6 +104,23 @@ export function ManagerDashboard({ onLogout }: Props) {
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-6">
 
+        {/* Dispatch link — prominent card pointing to desktop app */}
+        <a
+          href="dispatch.html"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-4 bg-blue-600 rounded-2xl px-5 py-4 shadow-sm active:bg-blue-700 transition touch-manipulation no-underline">
+          <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center shrink-0">
+            <span className="text-2xl">🗺</span>
+          </div>
+          <div className="flex-1">
+            <div className="font-bold text-white">Route Dispatcher</div>
+            <div className="text-blue-200 text-xs mt-0.5">Assign properties &amp; build crew routes</div>
+            <div className="text-blue-300 text-xs mt-1">Best on desktop / laptop</div>
+          </div>
+          <ExternalLink size={18} className="text-blue-300 shrink-0" />
+        </a>
+
         {/* Late alert */}
         {late.length > 0 && (
           <div className="bg-red-50 border border-red-200 rounded-2xl px-4 py-3">
@@ -111,8 +129,8 @@ export function ManagerDashboard({ onLogout }: Props) {
           </div>
         )}
 
-        {/* Live crew status */}
-        <div className="bg-white rounded-2xl p-4 shadow-sm space-y-1">
+        {/* Crew status */}
+        <div className="bg-white rounded-2xl p-4 shadow-sm">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-bold text-gray-800">Crew Status</h2>
             <button onClick={() => setShowMap(true)}
@@ -120,34 +138,36 @@ export function ManagerDashboard({ onLogout }: Props) {
               <Map size={12} /> Live Map
             </button>
           </div>
-          {CREW.map(c => {
-            const s    = statusForCrew(c.name)
-            const live = liveLocations.find(l => l.userName === c.name)
-            const staleSec = live ? Math.round((Date.now() - live.updatedAt.getTime()) / 1000) : null
-            return (
-              <div key={c.pin} className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0">
-                <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm shrink-0"
-                  style={{ backgroundColor: c.color, color: c.textColor ?? '#fff' }}>
-                  {c.name[0]}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-gray-800 text-sm">{c.name}</span>
-                    <span className="text-gray-400 text-xs">{c.lm}</span>
-                    {staleSec !== null && staleSec < 120 && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" title="Live" />
-                    )}
+          <div className="space-y-1">
+            {CREW.map(c => {
+              const s    = statusForCrew(c.name)
+              const live = liveLocations.find(l => l.userName === c.name)
+              const staleSec = live ? Math.round((Date.now() - live.updatedAt.getTime()) / 1000) : null
+              return (
+                <div key={c.pin} className="flex items-center gap-3 py-2.5 border-b border-gray-50 last:border-0">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm shrink-0"
+                    style={{ backgroundColor: c.color, color: c.textColor ?? '#fff' }}>
+                    {c.name[0]}
                   </div>
-                  {s.property && <div className="text-xs text-gray-500 truncate">{s.property}</div>}
-                  <div className="text-xs text-gray-400">{hoursToday(c.name)}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-gray-800 text-sm">{c.name}</span>
+                      <span className="text-gray-400 text-xs">{c.lm}</span>
+                      {staleSec !== null && staleSec < 120 && (
+                        <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                      )}
+                    </div>
+                    {s.property && <div className="text-xs text-gray-500 truncate">{s.property}</div>}
+                    <div className="text-xs text-gray-400">{hoursToday(c.name)}</div>
+                  </div>
+                  <div className="text-xs font-semibold px-2.5 py-1 rounded-full shrink-0"
+                    style={{ backgroundColor: s.color + '20', color: s.color }}>
+                    {s.label}
+                  </div>
                 </div>
-                <div className="text-xs font-semibold px-2.5 py-1 rounded-full shrink-0"
-                  style={{ backgroundColor: s.color + '20', color: s.color }}>
-                  {s.label}
-                </div>
-              </div>
-            )
-          })}
+              )
+            })}
+          </div>
         </div>
 
         {/* Date + export */}
@@ -155,7 +175,7 @@ export function ManagerDashboard({ onLogout }: Props) {
           <input type="date" value={date} onChange={e => setDate(e.target.value)}
             className="flex-1 border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 touch-manipulation" />
           <button onClick={exportCSV} title="Export CSV"
-            className="h-11 w-11 flex items-center justify-center rounded-xl bg-blue-50 text-blue-600 active:bg-blue-100 transition touch-manipulation">
+            className="h-11 w-11 flex items-center justify-center rounded-xl bg-blue-50 text-blue-600 active:bg-blue-100 touch-manipulation">
             <Download size={20} />
           </button>
         </div>
@@ -192,16 +212,18 @@ export function ManagerDashboard({ onLogout }: Props) {
                       style={{ borderColor: c.color }}>
                       <div className="font-semibold text-sm text-gray-800">{s.property}</div>
                       <div className="text-xs text-gray-500 mt-0.5">
-                        {formatTime(s.clockIn)} → {s.clockOut ? formatTime(s.clockOut) : <span className="text-green-600 font-semibold">Active ●</span>}
+                        {formatTime(s.clockIn)} → {s.clockOut
+                          ? formatTime(s.clockOut)
+                          : <span className="text-green-600 font-semibold">Active ●</span>}
                         {s.durationMinutes !== null && ` · ${formatDuration(s.durationMinutes)}`}
                         {s.breakMinutes > 0 && ` · ${s.breakMinutes}m break`}
                       </div>
-                      {s.distanceFromProperty !== null && (
-                        <div className={`text-xs mt-0.5 ${s.distanceFromProperty > 500 ? 'text-orange-500' : 'text-gray-400'}`}>
+                      {s.distanceFromProperty !== null && s.distanceFromProperty > 500 && (
+                        <div className="text-xs text-orange-500 mt-0.5">
                           📍 {s.distanceFromProperty}m from property
                         </div>
                       )}
-                      {s.note ? <div className="text-xs text-gray-400 mt-0.5 italic">"{s.note}"</div> : null}
+                      {s.note && <div className="text-xs text-gray-400 italic mt-0.5">"{s.note}"</div>}
                     </div>
                   ))}
                 </div>

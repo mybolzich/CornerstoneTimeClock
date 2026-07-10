@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cornerstone Dispatch — Route Builder</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script type="module">
+    import { initializeApp }           from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js'
+    import { getFirestore, collection, doc, setDoc, onSnapshot,
+             query, where, orderBy, Timestamp, getDocs }
+      from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js'
+
+    // ── Firebase ─────────────────────────────────────────────────────────────
+    const app = initializeApp({
+      apiKey:            'AIzaSyDSIcTiBswVGF2oCSzUocAPEN3qi_muYls',
+      authDomain:        'serviroute-3ec0d.firebaseapp.com',
+      projectId:         'serviroute-3ec0d',
+      storageBucket:     'serviroute-3ec0d.firebasestorage.app',
+      messagingSenderId: '203389465925',
+      appId:             '1:203389465925:web:31658625175d7a5ac53a2c',
+    })
+    const db = getFirestore(app)
+
+    // ── Static data ───────────────────────────────────────────────────────────
+    const CREW = [
+      { pin:'1001', name:'Neri',   lm:'LM1', color:'#16a34a', text:'#fff' },
+      { pin:'1002', name:'Mateos', lm:'LM2', color:'#2563eb', text:'#fff' },
+      { pin:'1003', name:'Erick',  lm:'LM3', color:'#eab308', text:'#0a1628' },
+      { pin:'1004', name:'Luis',   lm:'LM4', color:'#7c3aed', text:'#fff' },
+      { pin:'1005', name:'Mario',  lm:'LM5', color:'#db2877', text:'#fff' },
+    ]
+
+    const SCHEDULE = {
+      Monday:    { Neri:'Sienna Cove',   Mateos:'Woodlake Preserve',    Erick:'Willow Walk',                 Luis:'Birchwood',               Mario:'Walden Woods'       },
+      Tuesday:   { Neri:'Sienna Cove',   Mateos:'Bridge Haven',         Erick:'Willow Walk / Golden Meadow', Luis:'Trotters Crossing',        Mario:'Spring Rose'        },
+      Wednesday: { Neri:'Sienna Cove',   Mateos:'Bridge Haven',         Erick:'Cheyenne Preserve',           Luis:'Belmont Glen',             Mario:'Boyette / Bell Lake' },
+      Thursday:  { Neri:'Wilder Meadow', Mateos:'Altera / Walden Pond', Erick:'Cedar Mills',                 Luis:'Victory Landing / Altera', Mario:'Camden Woods'       },
+    }
+
+    const ALL_PROPERTIES = [
+      'Sienna Cove','Wilder Meadow','Woodlake Preserve','Bridge Haven','Altera',
+      'Walden Pond','Walden Woods','Willow Walk','Golden Meadow','Cheyenne Preserve',
+      'Cedar Mills','Birchwood','Trotters Crossing','Belmont Glen','Victory Landing',
+      'Spring Rose','Boyette','Bell Lake','Camden Woods','Office / Yard',
+    ]
+
+    // ── State ─────────────────────────────────────────────────────────────────
+    let selectedDate = new Date().toISOString().slice(0,10)
+    let routes = {}          // pin → { crewPin, crewName, date, stops[] }
+    let liveShifts = []      // from timeclock_shifts for today
+    let unsub = null
+
+    function dayNameOf(dateStr) {
+      return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][
+        new Date(dateStr + 'T12:00:00').getDay()
+      ]
+    }
+
+    function parseStops(raw) {
+      return raw.split('/').map(s => s.trim()).filter(Boolean)
+    }
+
+    function todayStr() { return new Date().toISOString().slice(0,10) }
+
+    // ── Firestore subscriptions ───────────────────────────────────────────────
+    function subscribeDate(date) {
+      if (unsub) unsub()
+
+      // Dispatch routes
+      const q = query(collection(db,'dispatchRoutes'), where('date','==',date))
+      unsub = onSnapshot(q, snap => {
+        snap.docs.forEach(d => {
+          const data = d.data()
+          // Only update from server if we don't have a local unsaved edit
+          if (!routes[data.crewPin] || routes[data.crewPin]._serverTs) {
+            routes[data.crewPin] = { ...data, _serverTs: true }
+          }
+        })
+        renderAll()
+      })
+
+      // Crew live shifts for status column
+      const sq = query(collection(db,'timeclock_shifts'), where('date','==',date))
+      getDocs(sq).then(snap => {
+        liveShifts = snap.docs.map(d => d.data())
+        renderStatusBadges()
+      })
+    }
+
+    // ── Load template from schedule ───────────────────────────────────────────
+    function loadTemplate(date) {
+      const dayName = dayNameOf(date)
+      const template = SCHEDULE[dayName]
+      CREW.forEach(c => {
+        const raw = template?.[c.name] ?? ''
+        routes[c.pin] = {
+          crewPin: c.pin, crewName: c.name, date,
+          stops: raw ? parseStops(raw) : [],
+          _serverTs: false,
+        }
+      })
+      renderAll()
+      showToast('Template loaded from schedule', 'blue')
+    }
+
+    // ── Save ──────────────────────────────────────────────────────────────────
+    async function saveRoute(pin) {
+      const route = routes[pin]
+      if (!route) return
+      const ref = doc(db, 'dispatchRoutes', `${pin}_${route.date}`)
+      try {
+        await setDoc(ref, {
+          crewPin:  route.crewPin,
+          crewName: route.crewName,
+          date:     route.date,
+          stops:    route.stops,
+          savedAt:  Timestamp.now(),
+        })
+        routes[pin]._serverTs = true
+        showToast(`${route.crewName}'s route saved`, 'green')
+        renderSaveBtn(pin)
+      } catch(e) {
+        showToast('Save failed — check connection', 'red')
+      }
+    }
+
+    async function saveAll() {
+      for (const c of CREW) { await saveRoute(c.pin) }
+      showToast('All routes saved ✓', 'green')
+    }
+
+    // ── Stop operations ───────────────────────────────────────────────────────
+    function addStop(pin, property) {
+      if (!property || !routes[pin]) return
+      if (routes[pin].stops.includes(property)) return
+      routes[pin].stops.push(property)
+      routes[pin]._serverTs = false
+      renderStopList(pin)
+      renderSaveBtn(pin)
+    }
+
+    function addCustomStop(pin, name) {
+      name = name.trim()
+      if (!name || !routes[pin]) return
+      routes[pin].stops.push(name)
+      routes[pin]._serverTs = false
+      renderStopList(pin)
+      renderSaveBtn(pin)
+    }
+
+    function removeStop(pin, idx) {
+      if (!routes[pin]) return
+      routes[pin].stops.splice(idx, 1)
+      routes[pin]._serverTs = false
+      renderStopList(pin)
+      renderSaveBtn(pin)
+    }
+
+    function moveStop(pin, idx, dir) {
+      const stops = routes[pin]?.stops
+      if (!stops) return
+      const swap = idx + dir
+      if (swap < 0 || swap >= stops.length) return
+      ;[stops[idx], stops[swap]] = [stops[swap], stops[idx]]
+      routes[pin]._serverTs = false
+      renderStopList(pin)
+      renderSaveBtn(pin)
+    }
+
+    // ── Render helpers ────────────────────────────────────────────────────────
+    function crewStatus(crewName) {
+      const shift = liveShifts.find(s => s.crewName === crewName && !s.clockOut)
+      if (shift) return { label:'On Clock', color:'#16a34a', bg:'#dcfce7' }
+      if (liveShifts.some(s => s.crewName === crewName)) return { label:'Done', color:'#6b7280', bg:'#f3f4f6' }
+      return { label:'Not In', color:'#dc2626', bg:'#fee2e2' }
+    }
+
+    function renderSaveBtn(pin) {
+      const btn = document.getElementById(`save-btn-${pin}`)
+      if (!btn) return
+      const unsaved = !routes[pin]?._serverTs
+      btn.textContent  = unsaved ? 'Save Route' : '✓ Saved'
+      btn.className = unsaved
+        ? 'save-btn px-4 py-2 rounded-lg text-sm font-bold text-white transition'
+        : 'save-btn px-4 py-2 rounded-lg text-sm font-bold transition'
+      btn.style.backgroundColor = unsaved ? '#16a34a' : '#dcfce7'
+      btn.style.color = unsaved ? '#fff' : '#15803d'
+    }
+
+    function renderStopList(pin) {
+      const el = document.getElementById(`stops-${pin}`)
+      if (!el) return
+      const stops = routes[pin]?.stops ?? []
+
+      if (stops.length === 0) {
+        el.innerHTML = `<div class="text-center text-gray-400 text-sm py-6 italic">No stops assigned yet</div>`
+        return
+      }
+
+      el.innerHTML = stops.map((stop, i) => `
+        <div class="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2.5 group">
+          <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0"
+            style="background:${CREW.find(c=>c.pin===pin)?.color}">
+            ${i+1}
+          </div>
+          <div class="flex-1 font-medium text-sm text-gray-800 truncate">${stop}</div>
+          <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button onclick="moveStop('${pin}',${i},-1)" ${i===0?'disabled':''} 
+              class="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:bg-gray-200 disabled:opacity-20 text-base leading-none">↑</button>
+            <button onclick="moveStop('${pin}',${i},1)" ${i===stops.length-1?'disabled':''}
+              class="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:bg-gray-200 disabled:opacity-20 text-base leading-none">↓</button>
+            <button onclick="removeStop('${pin}',${i})"
+              class="w-7 h-7 flex items-center justify-center rounded text-red-400 hover:bg-red-50 text-base leading-none">✕</button>
+          </div>
+        </div>
+      `).join('')
+    }
+
+    function renderStatusBadges() {
+      CREW.forEach(c => {
+        const badge = document.getElementById(`status-${c.pin}`)
+        if (!badge) return
+        const s = crewStatus(c.name)
+        badge.textContent = s.label
+        badge.style.color = s.color
+        badge.style.backgroundColor = s.bg
+      })
+    }
+
+    function renderAll() {
+      CREW.forEach(c => {
+        renderStopList(c.pin)
+        renderSaveBtn(c.pin)
+      })
+    }
+
+    function showToast(msg, color='green') {
+      const colors = { green:'bg-green-600', blue:'bg-blue-600', red:'bg-red-600' }
+      const t = document.getElementById('toast')
+      t.textContent = msg
+      t.className = `fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-xl text-white text-sm font-semibold shadow-lg transition-all duration-300 z-50 ${colors[color]}`
+      t.style.opacity = '1'
+      setTimeout(() => { t.style.opacity = '0' }, 2500)
+    }
+
+    // ── Expose to inline handlers ─────────────────────────────────────────────
+    window.moveStop   = moveStop
+    window.removeStop = removeStop
+    window.saveRoute  = saveRoute
+    window.saveAll    = saveAll
+
+    window.handleAddStop = (pin) => {
+      const sel = document.getElementById(`add-select-${pin}`)
+      const inp = document.getElementById(`add-custom-${pin}`)
+      if (inp && inp.value.trim()) { addCustomStop(pin, inp.value); inp.value = '' }
+      else if (sel && sel.value)   { addStop(pin, sel.value); sel.value = '' }
+    }
+
+    window.handleDateChange = (val) => {
+      selectedDate = val
+      routes = {}
+      subscribeDate(val)
+      document.getElementById('day-label').textContent = dayNameOf(val) || '—'
+    }
+
+    window.loadTemplate = () => loadTemplate(selectedDate)
+
+    window.loadDay = (day) => {
+      // Find next occurrence of that day from today
+      const days = { Monday:1,Tuesday:2,Wednesday:3,Thursday:4 }
+      const target = days[day]
+      const now = new Date()
+      const curr = now.getDay()
+      let diff = target - curr
+      if (diff <= 0) diff += 7
+      const d = new Date(now)
+      d.setDate(d.getDate() + diff)
+      const dateStr = d.toISOString().slice(0,10)
+      document.getElementById('date-picker').value = dateStr
+      selectedDate = dateStr
+      routes = {}
+      subscribeDate(dateStr)
+      document.getElementById('day-label').textContent = day
+      loadTemplate(dateStr)
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', () => {
+      const dp = document.getElementById('date-picker')
+      dp.value = selectedDate
+      document.getElementById('day-label').textContent = dayNameOf(selectedDate) || '—'
+
+      // Init empty route slots
+      CREW.forEach(c => {
+        routes[c.pin] = { crewPin:c.pin, crewName:c.name, date:selectedDate, stops:[], _serverTs:false }
+      })
+
+      subscribeDate(selectedDate)
+    })
+  </script>
+
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    .crew-card { transition: box-shadow .15s; }
+    .crew-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,.08); }
+    .save-btn { cursor: pointer; }
+    #toast { opacity: 0; pointer-events: none; }
+    @media (max-width: 900px) {
+      .desktop-note { display: block; }
+      .main-grid   { grid-template-columns: 1fr !important; }
+    }
+  </style>
+</head>
+
+<body class="bg-gray-50 min-h-screen">
+
+<!-- Toast -->
+<div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-xl text-white text-sm font-semibold shadow-lg z-50"></div>
+
+<!-- Mobile warning -->
+<div class="desktop-note hidden bg-amber-50 border-b border-amber-200 px-6 py-3 text-amber-800 text-sm font-medium text-center">
+  📐 Route Dispatcher is optimised for desktop. Some features may be cramped on mobile.
+</div>
+
+<!-- Top nav -->
+<header class="bg-[#0d1f3a] text-white px-8 py-4 flex items-center justify-between">
+  <div class="flex items-center gap-4">
+    <div>
+      <div class="text-xs text-white/50 font-semibold uppercase tracking-wider">Cornerstone LLC</div>
+      <div class="text-xl font-bold leading-tight">Route Dispatcher</div>
+    </div>
+    <div class="hidden sm:flex items-center gap-2 bg-white/10 rounded-lg px-3 py-1.5">
+      <span class="text-white/60 text-xs">Viewing:</span>
+      <span id="day-label" class="text-white text-sm font-semibold">—</span>
+    </div>
+  </div>
+
+  <div class="flex items-center gap-3">
+    <!-- Date picker -->
+    <input id="date-picker" type="date"
+      class="bg-white/10 text-white border border-white/20 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-white/30"
+      onchange="handleDateChange(this.value)" />
+
+    <!-- Load template -->
+    <button onclick="loadTemplate()"
+      class="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg text-sm font-semibold transition">
+      📋 Load Template
+    </button>
+
+    <!-- Save all -->
+    <button onclick="saveAll()"
+      class="px-5 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg text-sm font-bold transition shadow">
+      💾 Save All Routes
+    </button>
+
+    <!-- Back to app -->
+    <a href="index.html"
+      class="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg text-sm font-semibold transition no-underline">
+      ← App
+    </a>
+  </div>
+</header>
+
+<!-- Quick day buttons -->
+<div class="bg-white border-b border-gray-100 px-8 py-3 flex items-center gap-3">
+  <span class="text-xs font-semibold text-gray-400 uppercase tracking-wider mr-1">Quick load:</span>
+  <button onclick="loadDay('Monday')"    class="px-3 py-1.5 rounded-full text-xs font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 transition">Mon</button>
+  <button onclick="loadDay('Tuesday')"   class="px-3 py-1.5 rounded-full text-xs font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 transition">Tue</button>
+  <button onclick="loadDay('Wednesday')" class="px-3 py-1.5 rounded-full text-xs font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 transition">Wed</button>
+  <button onclick="loadDay('Thursday')"  class="px-3 py-1.5 rounded-full text-xs font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 transition">Thu</button>
+  <span class="text-gray-300 text-xs ml-2">Loads next occurrence of that day</span>
+</div>
+
+<!-- Main grid -->
+<main class="px-6 py-6">
+  <div class="main-grid grid gap-5" style="grid-template-columns: repeat(auto-fill, minmax(360px, 1fr))">
+
+    <!-- Crew cards generated by JS, but we pre-render the shell so JS can fill in -->
+    <!--
+      We render all 5 cards statically here so the layout is instant,
+      then JS fills in the stop lists and status badges.
+    -->
+
+    <!-- Card for each crew member -->
+    <div id="card-1001" class="crew-card bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
+      <div class="px-5 py-4 flex items-center gap-3 border-b border-gray-50">
+        <div class="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-lg shrink-0" style="background:#16a34a">N</div>
+        <div class="flex-1">
+          <div class="font-bold text-gray-800">Neri <span class="text-gray-400 font-normal text-sm">LM1</span></div>
+          <div id="status-1001" class="text-xs font-semibold px-2 py-0.5 rounded-full inline-block mt-0.5" style="background:#f3f4f6;color:#6b7280">—</div>
+        </div>
+        <button id="save-btn-1001" onclick="saveRoute('1001')" class="save-btn px-4 py-2 rounded-lg text-sm font-bold text-white transition" style="background:#16a34a">Save Route</button>
+      </div>
+      <div class="px-5 py-4 space-y-2">
+        <div id="stops-1001" class="space-y-2 min-h-[48px]"><div class="text-center text-gray-400 text-sm py-6 italic">Loading…</div></div>
+        <div class="flex gap-2 pt-2">
+          <select id="add-select-1001" class="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-300">
+            <option value="">+ Add property…</option>
+            PROPERTY_OPTIONS
+          </select>
+          <button onclick="handleAddStop('1001')" class="px-3 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg text-sm font-bold transition">Add</button>
+        </div>
+        <input id="add-custom-1001" type="text" placeholder="Or type a custom property name…"
+          class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-300"
+          onkeydown="if(event.key==='Enter') handleAddStop('1001')" />
+      </div>
+    </div>
+
+    <div id="card-1002" class="crew-card bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
+      <div class="px-5 py-4 flex items-center gap-3 border-b border-gray-50">
+        <div class="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-lg shrink-0" style="background:#2563eb">M</div>
+        <div class="flex-1">
+          <div class="font-bold text-gray-800">Mateos <span class="text-gray-400 font-normal text-sm">LM2</span></div>
+          <div id="status-1002" class="text-xs font-semibold px-2 py-0.5 rounded-full inline-block mt-0.5" style="background:#f3f4f6;color:#6b7280">—</div>
+        </div>
+        <button id="save-btn-1002" onclick="saveRoute('1002')" class="save-btn px-4 py-2 rounded-lg text-sm font-bold text-white transition" style="background:#2563eb">Save Route</button>
+      </div>
+      <div class="px-5 py-4 space-y-2">
+        <div id="stops-1002" class="space-y-2 min-h-[48px]"><div class="text-center text-gray-400 text-sm py-6 italic">Loading…</div></div>
+        <div class="flex gap-2 pt-2">
+          <select id="add-select-1002" class="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+            <option value="">+ Add property…</option>
+            PROPERTY_OPTIONS
+          </select>
+          <button onclick="handleAddStop('1002')" class="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-bold transition">Add</button>
+        </div>
+        <input id="add-custom-1002" type="text" placeholder="Or type a custom property name…"
+          class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+          onkeydown="if(event.key==='Enter') handleAddStop('1002')" />
+      </div>
+    </div>
+
+    <div id="card-1003" class="crew-card bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
+      <div class="px-5 py-4 flex items-center gap-3 border-b border-gray-50">
+        <div class="w-11 h-11 rounded-full flex items-center justify-center font-bold text-lg shrink-0" style="background:#eab308;color:#0a1628">E</div>
+        <div class="flex-1">
+          <div class="font-bold text-gray-800">Erick <span class="text-gray-400 font-normal text-sm">LM3</span></div>
+          <div id="status-1003" class="text-xs font-semibold px-2 py-0.5 rounded-full inline-block mt-0.5" style="background:#f3f4f6;color:#6b7280">—</div>
+        </div>
+        <button id="save-btn-1003" onclick="saveRoute('1003')" class="save-btn px-4 py-2 rounded-lg text-sm font-bold transition" style="background:#eab308;color:#0a1628">Save Route</button>
+      </div>
+      <div class="px-5 py-4 space-y-2">
+        <div id="stops-1003" class="space-y-2 min-h-[48px]"><div class="text-center text-gray-400 text-sm py-6 italic">Loading…</div></div>
+        <div class="flex gap-2 pt-2">
+          <select id="add-select-1003" class="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-300">
+            <option value="">+ Add property…</option>
+            PROPERTY_OPTIONS
+          </select>
+          <button onclick="handleAddStop('1003')" class="px-3 py-2 font-bold rounded-lg text-sm transition" style="background:#eab308;color:#0a1628">Add</button>
+        </div>
+        <input id="add-custom-1003" type="text" placeholder="Or type a custom property name…"
+          class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-300"
+          onkeydown="if(event.key==='Enter') handleAddStop('1003')" />
+      </div>
+    </div>
+
+    <div id="card-1004" class="crew-card bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
+      <div class="px-5 py-4 flex items-center gap-3 border-b border-gray-50">
+        <div class="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-lg shrink-0" style="background:#7c3aed">L</div>
+        <div class="flex-1">
+          <div class="font-bold text-gray-800">Luis <span class="text-gray-400 font-normal text-sm">LM4</span></div>
+          <div id="status-1004" class="text-xs font-semibold px-2 py-0.5 rounded-full inline-block mt-0.5" style="background:#f3f4f6;color:#6b7280">—</div>
+        </div>
+        <button id="save-btn-1004" onclick="saveRoute('1004')" class="save-btn px-4 py-2 rounded-lg text-sm font-bold text-white transition" style="background:#7c3aed">Save Route</button>
+      </div>
+      <div class="px-5 py-4 space-y-2">
+        <div id="stops-1004" class="space-y-2 min-h-[48px]"><div class="text-center text-gray-400 text-sm py-6 italic">Loading…</div></div>
+        <div class="flex gap-2 pt-2">
+          <select id="add-select-1004" class="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300">
+            <option value="">+ Add property…</option>
+            PROPERTY_OPTIONS
+          </select>
+          <button onclick="handleAddStop('1004')" class="px-3 py-2 bg-purple-700 hover:bg-purple-600 text-white rounded-lg text-sm font-bold transition">Add</button>
+        </div>
+        <input id="add-custom-1004" type="text" placeholder="Or type a custom property name…"
+          class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
+          onkeydown="if(event.key==='Enter') handleAddStop('1004')" />
+      </div>
+    </div>
+
+    <div id="card-1005" class="crew-card bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
+      <div class="px-5 py-4 flex items-center gap-3 border-b border-gray-50">
+        <div class="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-lg shrink-0" style="background:#db2877">M</div>
+        <div class="flex-1">
+          <div class="font-bold text-gray-800">Mario <span class="text-gray-400 font-normal text-sm">LM5</span></div>
+          <div id="status-1005" class="text-xs font-semibold px-2 py-0.5 rounded-full inline-block mt-0.5" style="background:#f3f4f6;color:#6b7280">—</div>
+        </div>
+        <button id="save-btn-1005" onclick="saveRoute('1005')" class="save-btn px-4 py-2 rounded-lg text-sm font-bold text-white transition" style="background:#db2877">Save Route</button>
+      </div>
+      <div class="px-5 py-4 space-y-2">
+        <div id="stops-1005" class="space-y-2 min-h-[48px]"><div class="text-center text-gray-400 text-sm py-6 italic">Loading…</div></div>
+        <div class="flex gap-2 pt-2">
+          <select id="add-select-1005" class="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pink-300">
+            <option value="">+ Add property…</option>
+            PROPERTY_OPTIONS
+          </select>
+          <button onclick="handleAddStop('1005')" class="px-3 py-2 bg-pink-600 hover:bg-pink-500 text-white rounded-lg text-sm font-bold transition">Add</button>
+        </div>
+        <input id="add-custom-1005" type="text" placeholder="Or type a custom property name…"
+          class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pink-300"
+          onkeydown="if(event.key==='Enter') handleAddStop('1005')" />
+      </div>
+    </div>
+
+  </div><!-- /main-grid -->
+
+  <!-- Legend / help -->
+  <div class="mt-8 bg-white rounded-2xl border border-gray-100 p-6">
+    <div class="font-bold text-gray-700 mb-3 text-sm">How to use</div>
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm text-gray-500">
+      <div><span class="font-semibold text-gray-700">1. Pick a date</span><br>Use the date picker or quick Mon–Thu buttons. Template auto-loads the default schedule.</div>
+      <div><span class="font-semibold text-gray-700">2. Build routes</span><br>Add properties from the dropdown or type custom names. Reorder with ↑↓. Remove with ✕.</div>
+      <div><span class="font-semibold text-gray-700">3. Save &amp; dispatch</span><br>Save per crew or click "Save All". Routes push live to crew phones instantly via Firestore.</div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+// Replace PROPERTY_OPTIONS placeholder in all selects
+const opts = [
+  'Sienna Cove','Wilder Meadow','Woodlake Preserve','Bridge Haven','Altera',
+  'Walden Pond','Walden Woods','Willow Walk','Golden Meadow','Cheyenne Preserve',
+  'Cedar Mills','Birchwood','Trotters Crossing','Belmont Glen','Victory Landing',
+  'Spring Rose','Boyette','Bell Lake','Camden Woods','Office / Yard',
+].map(p => `<option value="${p}">${p}</option>`).join('')
+
+document.querySelectorAll('select[id^="add-select-"]').forEach(sel => {
+  sel.innerHTML = `<option value="">+ Add property…</option>` + opts
+})
+</script>
+
+</body>
+</html>
