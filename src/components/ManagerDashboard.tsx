@@ -1,18 +1,21 @@
 import { useState } from 'react'
-import { LogOut, Download, RefreshCw } from 'lucide-react'
+import { LogOut, Download, RefreshCw, Map } from 'lucide-react'
 import { CREW } from '../lib/data'
 import { useManagerShifts, Shift } from '../lib/useShifts'
 import { formatTime, formatDuration, todayStr } from '../lib/data'
+import { RouteMap } from './RouteMap'
 
 interface Props { onLogout: () => void }
 
 export function ManagerDashboard({ onLogout }: Props) {
   const [date, setDate] = useState(todayStr())
+  const [showMap, setShowMap] = useState(false)
   const { shifts, loading } = useManagerShifts(date)
 
-  // Crew status summary
   const onClock = shifts.filter(s => s.clockOut === null).length
-  const totalHours = shifts.filter(s => s.durationMinutes !== null).reduce((sum, s) => sum + (s.durationMinutes ?? 0), 0) / 60
+  const totalHours = shifts
+    .filter(s => s.durationMinutes !== null)
+    .reduce((sum, s) => sum + (s.durationMinutes ?? 0), 0) / 60
 
   function statusForCrew(crewName: string) {
     const open = shifts.find(s => s.crewName === crewName && s.clockOut === null)
@@ -26,17 +29,15 @@ export function ManagerDashboard({ onLogout }: Props) {
     const rows = [
       ['Date','Crew','LM','Property','Clock In','Clock Out','Break (min)','Total Hours','GPS Distance (m)','Note']
     ]
-    shifts.forEach(s => {
-      rows.push([
-        s.date, s.crewName, s.lm, s.property,
-        formatTime(s.clockIn),
-        s.clockOut ? formatTime(s.clockOut) : '',
-        s.breakMinutes.toString(),
-        s.durationMinutes !== null ? (s.durationMinutes / 60).toFixed(2) : '',
-        s.distanceFromProperty?.toString() ?? '',
-        s.note
-      ])
-    })
+    shifts.forEach(s => rows.push([
+      s.date, s.crewName, s.lm, s.property,
+      formatTime(s.clockIn),
+      s.clockOut ? formatTime(s.clockOut) : '',
+      s.breakMinutes.toString(),
+      s.durationMinutes !== null ? (s.durationMinutes / 60).toFixed(2) : '',
+      s.distanceFromProperty?.toString() ?? '',
+      s.note
+    ]))
     const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n')
     const a = document.createElement('a')
     a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv)
@@ -47,33 +48,44 @@ export function ManagerDashboard({ onLogout }: Props) {
   const late = date === todayStr()
     ? CREW.filter(c => {
         const now = new Date()
-        if (now.getHours() < 7 || now.getDay() === 0 || now.getDay() === 5 || now.getDay() === 6) return false
+        if (now.getDay() === 0 || now.getDay() === 5 || now.getDay() === 6) return false
         const cutoff = new Date(); cutoff.setHours(7, 30, 0, 0)
         if (now < cutoff) return false
         return !shifts.some(s => s.crewName === c.name)
       })
     : []
 
+  if (showMap) return <RouteMap onClose={() => setShowMap(false)} />
+
   return (
     <div className="min-h-screen" style={{ background: '#f5f5f0' }}>
       {/* Header */}
-      <div className="text-white px-5 pt-12 pb-6" style={{ backgroundColor: '#0d1f3a' }}>
+      <div className="text-white px-5 pt-12 pb-5" style={{ backgroundColor: '#0d1f3a' }}>
         <div className="flex justify-between items-center">
           <div>
             <div className="text-white/60 text-sm">Manager View</div>
             <div className="text-2xl font-bold">Cornerstone LLC</div>
           </div>
-          <button onClick={onLogout} className="p-2 rounded-lg bg-white/20 active:bg-white/30">
-            <LogOut size={20} color="white" />
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowMap(true)}
+              className="p-2 rounded-lg bg-white/20 active:bg-white/30 flex items-center gap-1.5 px-3"
+              title="Route Map">
+              <Map size={18} color="white" />
+              <span className="text-white text-sm font-semibold">Map</span>
+            </button>
+            <button onClick={onLogout} className="p-2 rounded-lg bg-white/20 active:bg-white/30">
+              <LogOut size={20} color="white" />
+            </button>
+          </div>
         </div>
 
         {/* KPI strip */}
-        <div className="grid grid-cols-3 gap-3 mt-5">
+        <div className="grid grid-cols-3 gap-3 mt-4">
           {[
             { label: 'On Clock', value: `${onClock}/5`, color: '#16a34a' },
-            { label: 'Hours Today', value: totalHours.toFixed(1) + 'h', color: '#2563eb' },
-            { label: 'Late', value: late.length.toString(), color: late.length > 0 ? '#dc2626' : '#6b7280' },
+            { label: 'Hours Today', value: `${totalHours.toFixed(1)}h`, color: '#2563eb' },
+            { label: 'Late', value: `${late.length}`, color: late.length > 0 ? '#dc2626' : '#6b7280' },
           ].map(k => (
             <div key={k.label} className="bg-white/10 rounded-xl px-3 py-3 text-center">
               <div className="text-2xl font-bold" style={{ color: k.color }}>{k.value}</div>
@@ -85,7 +97,7 @@ export function ManagerDashboard({ onLogout }: Props) {
 
       <div className="max-w-md mx-auto px-4 pb-10 space-y-4 mt-4">
 
-        {/* Late Alert */}
+        {/* Late alert */}
         {late.length > 0 && (
           <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3">
             <div className="font-semibold text-red-700 text-sm mb-1">⚠️ Not clocked in after 7:30 AM</div>
@@ -93,9 +105,16 @@ export function ManagerDashboard({ onLogout }: Props) {
           </div>
         )}
 
-        {/* Crew Status */}
+        {/* Crew status */}
         <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
-          <h2 className="font-bold text-gray-800">Crew Status</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="font-bold text-gray-800">Crew Status</h2>
+            <button
+              onClick={() => setShowMap(true)}
+              className="text-xs text-blue-600 font-semibold flex items-center gap-1">
+              <Map size={13} /> View Map
+            </button>
+          </div>
           {CREW.map(c => {
             const s = statusForCrew(c.name)
             return (
@@ -105,10 +124,12 @@ export function ManagerDashboard({ onLogout }: Props) {
                   {c.name[0]}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-gray-800 text-sm">{c.name} <span className="text-gray-400 font-normal">{c.lm}</span></div>
+                  <div className="font-semibold text-gray-800 text-sm">
+                    {c.name} <span className="text-gray-400 font-normal">{c.lm}</span>
+                  </div>
                   {s.property && <div className="text-xs text-gray-500 truncate">{s.property}</div>}
                 </div>
-                <div className="text-xs font-semibold px-2 py-1 rounded-full"
+                <div className="text-xs font-semibold px-2 py-1 rounded-full shrink-0"
                   style={{ backgroundColor: s.color + '20', color: s.color }}>
                   {s.label}
                 </div>
@@ -117,7 +138,7 @@ export function ManagerDashboard({ onLogout }: Props) {
           })}
         </div>
 
-        {/* Date Picker & Export */}
+        {/* Date picker + export */}
         <div className="bg-white rounded-2xl p-4 shadow-sm flex gap-3 items-center">
           <input type="date" value={date} onChange={e => setDate(e.target.value)}
             className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
@@ -127,14 +148,14 @@ export function ManagerDashboard({ onLogout }: Props) {
           </button>
         </div>
 
-        {/* Shifts Table */}
+        {/* Shifts */}
         {loading ? (
           <div className="bg-white rounded-2xl p-6 text-center text-gray-400 flex items-center justify-center gap-2">
             <RefreshCw size={16} className="animate-spin" /> Loading…
           </div>
         ) : shifts.length === 0 ? (
           <div className="bg-white rounded-2xl p-6 text-center text-gray-400 text-sm">
-            No shifts for {date}
+            No shifts recorded for {date}
           </div>
         ) : (
           <div className="space-y-3">
@@ -162,7 +183,7 @@ export function ManagerDashboard({ onLogout }: Props) {
                       </div>
                       {s.distanceFromProperty !== null && (
                         <div className={`text-xs mt-0.5 ${s.distanceFromProperty > 500 ? 'text-orange-500' : 'text-gray-400'}`}>
-                          GPS: {s.distanceFromProperty}m from property
+                          📍 {s.distanceFromProperty}m from property
                         </div>
                       )}
                       {s.note && <div className="text-xs text-gray-400 mt-0.5 italic">"{s.note}"</div>}
