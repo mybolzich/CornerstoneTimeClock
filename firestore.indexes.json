@@ -1,0 +1,21 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "timeclock_shifts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "pin", "order": "ASCENDING" },
+        { "fieldPath": "clockIn", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "timeclock_shifts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "date", "order": "ASCENDING" },
+        { "fieldPath": "clockIn", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

@@ -75,19 +75,23 @@ export function useCrewShifts(pin: string) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    // Single-field query only — no composite index needed
+    // Filter by pin only, then filter date client-side
     const q = query(
       collection(db, 'timeclock_shifts'),
       where('pin', '==', pin),
-      where('date', '==', todayStr()),
       orderBy('clockIn', 'desc')
     )
     const unsub = onSnapshot(q, (snap) => {
-      const shifts = snap.docs.map(d => fromFirestore(d.id, d.data()))
+      const today = todayStr()
+      const shifts = snap.docs
+        .map(d => fromFirestore(d.id, d.data()))
+        .filter(s => s.date === today)           // filter date client-side
       setTodayShifts(shifts)
       setActiveShift(shifts.find(s => s.clockOut === null) ?? null)
       setLoading(false)
     }, (err) => {
-      console.error('Firestore shifts error:', err)
+      console.error('Firestore shifts error:', err.code, err.message)
       setLoading(false)
     })
     return unsub
@@ -97,23 +101,27 @@ export function useCrewShifts(pin: string) {
     if (!activeShift) { setActiveBreak(null); return }
     const q = query(
       collection(db, 'timeclock_breaks'),
-      where('shiftId', '==', activeShift.id),
-      where('breakEnd', '==', null)
+      where('shiftId', '==', activeShift.id)
     )
     const unsub = onSnapshot(q, (snap) => {
-      if (snap.empty) { setActiveBreak(null); return }
-      const d = snap.docs[0]
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const data = d.data() as Record<string, any>
-      setActiveBreak({
-        id: d.id,
-        shiftId: data.shiftId,
-        crewName: data.crewName,
-        date: data.date,
-        breakStart: (data.breakStart as Timestamp).toDate(),
-        breakEnd: null,
-        breakType: data.breakType,
-      })
+      const openBreak = snap.docs
+        .map(d => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const data = d.data() as Record<string, any>
+          return {
+            id: d.id,
+            shiftId: data.shiftId,
+            crewName: data.crewName,
+            date: data.date,
+            breakStart: (data.breakStart as Timestamp).toDate(),
+            breakEnd: data.breakEnd ? (data.breakEnd as Timestamp).toDate() : null,
+            breakType: data.breakType as 'lunch' | 'rest',
+          }
+        })
+        .find(b => b.breakEnd === null) ?? null
+      setActiveBreak(openBreak)
+    }, (err) => {
+      console.error('Firestore breaks error:', err.code, err.message)
     })
     return unsub
   }, [activeShift?.id])
@@ -147,13 +155,13 @@ export function useCrewShifts(pin: string) {
     const gps = await getGps()
     const now = new Date()
     const totalMs = now.getTime() - activeShift.clockIn.getTime()
-    const duration = Math.round(totalMs / 60000) - activeShift.breakMinutes
+    const duration = Math.max(0, Math.round(totalMs / 60000) - activeShift.breakMinutes)
     await updateDoc(doc(db, 'timeclock_shifts', activeShift.id), {
       clockOut: Timestamp.now(),
       clockOutLat: gps?.lat ?? null,
       clockOutLng: gps?.lng ?? null,
       note,
-      durationMinutes: Math.max(0, duration),
+      durationMinutes: duration,
     })
   }
 
@@ -183,7 +191,6 @@ export function useCrewShifts(pin: string) {
 
   const totalMinutes = todayShifts.reduce((sum, s) => {
     if (s.clockOut !== null) return sum + (s.durationMinutes ?? 0)
-    // active shift: running total minus breaks
     return sum + Math.max(0, (Date.now() - s.clockIn.getTime()) / 60000 - s.breakMinutes)
   }, 0)
 
@@ -198,6 +205,7 @@ export function useManagerShifts(date: string) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    // Query by date only — single field, no composite index needed
     const q = query(
       collection(db, 'timeclock_shifts'),
       where('date', '==', date),
@@ -207,7 +215,7 @@ export function useManagerShifts(date: string) {
       setShifts(snap.docs.map(d => fromFirestore(d.id, d.data())))
       setLoading(false)
     }, (err) => {
-      console.error('Firestore manager error:', err)
+      console.error('Firestore manager error:', err.code, err.message)
       setLoading(false)
     })
     return unsub
