@@ -35,25 +35,37 @@ export interface Break {
   breakType: 'lunch' | 'rest'
 }
 
-function fromFirestore(id: string, data: Record<string, unknown>): Shift {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function fromFirestore(id: string, data: Record<string, any>): Shift {
   return {
     id,
-    crewName: data.crewName as string,
-    lm: data.lm as string,
-    pin: data.pin as string,
-    property: data.property as string,
-    date: data.date as string,
+    crewName: data.crewName,
+    lm: data.lm,
+    pin: data.pin,
+    property: data.property,
+    date: data.date,
     clockIn: (data.clockIn as Timestamp).toDate(),
     clockOut: data.clockOut ? (data.clockOut as Timestamp).toDate() : null,
-    clockInLat: data.clockInLat as number | null,
-    clockInLng: data.clockInLng as number | null,
-    clockOutLat: data.clockOutLat as number | null,
-    clockOutLng: data.clockOutLng as number | null,
-    distanceFromProperty: data.distanceFromProperty as number | null,
-    note: (data.note as string) || '',
-    durationMinutes: data.durationMinutes as number | null,
-    breakMinutes: (data.breakMinutes as number) || 0,
+    clockInLat: data.clockInLat ?? null,
+    clockInLng: data.clockInLng ?? null,
+    clockOutLat: data.clockOutLat ?? null,
+    clockOutLng: data.clockOutLng ?? null,
+    distanceFromProperty: data.distanceFromProperty ?? null,
+    note: data.note ?? '',
+    durationMinutes: data.durationMinutes ?? null,
+    breakMinutes: data.breakMinutes ?? 0,
   }
+}
+
+async function getGps(): Promise<{ lat: number; lng: number } | null> {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) { resolve(null); return }
+    navigator.geolocation.getCurrentPosition(
+      p => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      () => resolve(null),
+      { timeout: 8000 }
+    )
+  })
 }
 
 export function useCrewShifts(pin: string) {
@@ -70,10 +82,12 @@ export function useCrewShifts(pin: string) {
       orderBy('clockIn', 'desc')
     )
     const unsub = onSnapshot(q, (snap) => {
-      const shifts = snap.docs.map(d => fromFirestore(d.id, d.data() as Record<string, unknown>))
+      const shifts = snap.docs.map(d => fromFirestore(d.id, d.data()))
       setTodayShifts(shifts)
-      const open = shifts.find(s => s.clockOut === null) ?? null
-      setActiveShift(open)
+      setActiveShift(shifts.find(s => s.clockOut === null) ?? null)
+      setLoading(false)
+    }, (err) => {
+      console.error('Firestore shifts error:', err)
       setLoading(false)
     })
     return unsub
@@ -89,30 +103,20 @@ export function useCrewShifts(pin: string) {
     const unsub = onSnapshot(q, (snap) => {
       if (snap.empty) { setActiveBreak(null); return }
       const d = snap.docs[0]
-      const data = d.data() as Record<string, unknown>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = d.data() as Record<string, any>
       setActiveBreak({
         id: d.id,
-        shiftId: data.shiftId as string,
-        crewName: data.crewName as string,
-        date: data.date as string,
+        shiftId: data.shiftId,
+        crewName: data.crewName,
+        date: data.date,
         breakStart: (data.breakStart as Timestamp).toDate(),
         breakEnd: null,
-        breakType: data.breakType as 'lunch' | 'rest',
+        breakType: data.breakType,
       })
     })
     return unsub
   }, [activeShift?.id])
-
-  async function getGps(): Promise<{ lat: number; lng: number } | null> {
-    return new Promise((resolve) => {
-      if (!navigator.geolocation) { resolve(null); return }
-      navigator.geolocation.getCurrentPosition(
-        p => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
-        () => resolve(null),
-        { timeout: 8000 }
-      )
-    })
-  }
 
   async function clockIn(crewName: string, lm: string, property: string) {
     const gps = await getGps()
@@ -142,13 +146,14 @@ export function useCrewShifts(pin: string) {
     if (!activeShift) return
     const gps = await getGps()
     const now = new Date()
-    const duration = (now.getTime() - activeShift.clockIn.getTime()) / 60000
+    const totalMs = now.getTime() - activeShift.clockIn.getTime()
+    const duration = Math.round(totalMs / 60000) - activeShift.breakMinutes
     await updateDoc(doc(db, 'timeclock_shifts', activeShift.id), {
       clockOut: Timestamp.now(),
       clockOutLat: gps?.lat ?? null,
       clockOutLng: gps?.lng ?? null,
       note,
-      durationMinutes: Math.round(duration - activeShift.breakMinutes),
+      durationMinutes: Math.max(0, duration),
     })
   }
 
@@ -167,19 +172,25 @@ export function useCrewShifts(pin: string) {
   async function endBreak() {
     if (!activeBreak || !activeShift) return
     const now = Timestamp.now()
-    const breakMins = Math.round((now.toDate().getTime() - activeBreak.breakStart.getTime()) / 60000)
+    const breakMins = Math.round(
+      (now.toDate().getTime() - activeBreak.breakStart.getTime()) / 60000
+    )
     await updateDoc(doc(db, 'timeclock_breaks', activeBreak.id), { breakEnd: now })
     await updateDoc(doc(db, 'timeclock_shifts', activeShift.id), {
-      breakMinutes: activeShift.breakMinutes + breakMins
+      breakMinutes: activeShift.breakMinutes + breakMins,
     })
   }
 
-  const totalMinutes = todayShifts
-    .filter(s => s.durationMinutes !== null)
-    .reduce((sum, s) => sum + (s.durationMinutes ?? 0), 0)
-    + (activeShift ? (Date.now() - activeShift.clockIn.getTime()) / 60000 - activeShift.breakMinutes : 0)
+  const totalMinutes = todayShifts.reduce((sum, s) => {
+    if (s.clockOut !== null) return sum + (s.durationMinutes ?? 0)
+    // active shift: running total minus breaks
+    return sum + Math.max(0, (Date.now() - s.clockIn.getTime()) / 60000 - s.breakMinutes)
+  }, 0)
 
-  return { todayShifts, activeShift, activeBreak, loading, clockIn, clockOut, startBreak, endBreak, totalMinutes }
+  return {
+    todayShifts, activeShift, activeBreak,
+    loading, clockIn, clockOut, startBreak, endBreak, totalMinutes
+  }
 }
 
 export function useManagerShifts(date: string) {
@@ -193,7 +204,10 @@ export function useManagerShifts(date: string) {
       orderBy('clockIn', 'asc')
     )
     const unsub = onSnapshot(q, (snap) => {
-      setShifts(snap.docs.map(d => fromFirestore(d.id, d.data() as Record<string, unknown>)))
+      setShifts(snap.docs.map(d => fromFirestore(d.id, d.data())))
+      setLoading(false)
+    }, (err) => {
+      console.error('Firestore manager error:', err)
       setLoading(false)
     })
     return unsub

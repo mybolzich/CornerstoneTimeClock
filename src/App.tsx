@@ -6,15 +6,6 @@ import { ManagerDashboard } from './components/ManagerDashboard'
 export default function App() {
   const { state, loginWithPin, logout } = useAuth()
 
-  if (state.status === 'loading') {
-    return (
-      <div className="min-h-screen flex items-center justify-center"
-        style={{ background: 'linear-gradient(135deg, #0d1f3a 0%, #081428 100%)' }}>
-        <div className="text-white text-lg opacity-60">Loading…</div>
-      </div>
-    )
-  }
-
   if (state.status === 'unauthenticated') {
     return (
       <PinPad
