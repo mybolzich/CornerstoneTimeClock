@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { collection, query, where, onSnapshot } from 'firebase/firestore'
 import { db } from '../lib/firebase'
-import { CREW, PROPERTY_COORDS, getTodayName, todayStr } from '../lib/data'
+import { CREW, SCHEDULE, PROPERTY_COORDS, getTodayName, todayStr } from '../lib/data'
 import { LiveLocation } from '../lib/useShifts'
 
 const GMAPS_KEY = 'AIzaSyAfrZbRXLbrQGNHrjobcamxKuXBUm94nR8'
