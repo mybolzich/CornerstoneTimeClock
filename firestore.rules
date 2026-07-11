@@ -1,0 +1,25 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // timeclock_shifts — crew clock-in/out records
+    match /timeclock_shifts/{id} {
+      allow read, write: if true;
+    }
+
+    // timeclock_breaks — break tracking per shift
+    match /timeclock_breaks/{id} {
+      allow read, write: if true;
+    }
+
+    // liveLocations — real-time GPS per crew (written every 30s while clocked in)
+    match /liveLocations/{id} {
+      allow read, write: if true;
+    }
+
+    // dispatchRoutes — route assignments written by dispatcher, read by crew app
+    match /dispatchRoutes/{id} {
+      allow read, write: if true;
+    }
+  }
+}

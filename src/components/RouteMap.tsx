@@ -1,59 +1,29 @@
 import { useEffect, useRef, useState } from 'react'
-import { CREW, SCHEDULE, PROPERTY_COORDS, getTodayName, haversineMeters } from '../lib/data'
+import { collection, query, where, onSnapshot } from 'firebase/firestore'
+import { db } from '../lib/firebase'
+import { CREW, PROPERTY_COORDS, getTodayName, todayStr } from '../lib/data'
 import { LiveLocation } from '../lib/useShifts'
 
-const GOOGLE_MAPS_KEY = 'AIzaSyAfrZbRXLbrQGNHrjobcamxKuXBUm94nR8'
+const GMAPS_KEY = 'AIzaSyAfrZbRXLbrQGNHrjobcamxKuXBUm94nR8'
 
-function parseProperties(raw: string): string[] {
-  return raw.split('/').map(s => s.trim()).filter(Boolean)
-}
-
-function getCoords(name: string) {
-  if (PROPERTY_COORDS[name]) return PROPERTY_COORDS[name]
-  return PROPERTY_COORDS[name.split('/')[0].trim()] ?? null
-}
-
-interface CrewRoute {
-  crew: typeof CREW[number]
-  propertyRaw: string
-  properties: string[]
-  coords: ({ lat: number; lng: number } | null)[]
-  distanceKm: number | null
-  etaMinutes: number | null
-}
-
-function buildRoutes(dayName: string): CrewRoute[] {
-  const daySchedule = SCHEDULE[dayName]
-  if (!daySchedule) return []
-  return CREW.map(crew => {
-    const raw    = daySchedule[crew.name] ?? 'No Route'
-    const props  = parseProperties(raw)
-    const coords = props.map(p => getCoords(p))
-    let distanceKm: number | null = null
-    let etaMinutes: number | null = null
-    if (coords.length >= 2 && coords[0] && coords[1]) {
-      const d = haversineMeters(coords[0].lat, coords[0].lng, coords[1].lat, coords[1].lng)
-      distanceKm = Math.round(d / 100) / 10
-      etaMinutes = Math.round((distanceKm * 1.3 / 45) * 60)
-    }
-    return { crew, propertyRaw: raw, properties: props, coords, distanceKm, etaMinutes }
-  })
-}
-
-let gmapsLoaded  = false
-let gmapsLoading = false
-const gmapsCbs: (() => void)[] = []
-
-function loadGoogleMaps(cb: () => void) {
-  if (gmapsLoaded) { cb(); return }
-  gmapsCbs.push(cb)
-  if (gmapsLoading) return
-  gmapsLoading = true
-  const s = document.createElement('script')
-  s.src   = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_KEY}`
-  s.async = true
-  s.onload = () => { gmapsLoaded = true; gmapsCbs.forEach(f => f()); gmapsCbs.length = 0 }
+let _gmLoaded = false, _gmLoading = false
+const _gmCbs: (() => void)[] = []
+function loadGM(cb: () => void) {
+  if (_gmLoaded) { cb(); return }
+  _gmCbs.push(cb)
+  if (_gmLoading) return
+  _gmLoading = true
+  const s   = document.createElement('script')
+  s.src     = `https://maps.googleapis.com/maps/api/js?key=${GMAPS_KEY}&libraries=directions,geometry`
+  s.async   = true
+  s.onload  = () => { _gmLoaded = true; _gmCbs.forEach(f => f()); _gmCbs.length = 0 }
   document.head.appendChild(s)
+}
+
+interface DispatchedRoute {
+  crewPin: string
+  crewName: string
+  stops: string[]
 }
 
 interface Props {
@@ -63,138 +33,201 @@ interface Props {
 
 export function RouteMap({ onClose, liveLocations }: Props) {
   const mapRef      = useRef<HTMLDivElement>(null)
-  const [ready,    setReady]    = useState(false)
-  const [selected, setSelected] = useState<string | null>(null)
-  const [info,     setInfo]     = useState<string | null>(null)
-  const mapInstance = useRef<google.maps.Map | null>(null)
-  const markers     = useRef<google.maps.Marker[]>([])
-  const lines       = useRef<google.maps.Polyline[]>([])
+  const mapInst     = useRef<google.maps.Map | null>(null)
+  const markerRefs  = useRef<google.maps.Marker[]>([])
+  const lineRefs    = useRef<google.maps.DirectionsRenderer[]>([])
   const liveMarkers = useRef<google.maps.Marker[]>([])
 
-  const dayName  = getTodayName()
-  const routes   = buildRoutes(dayName)
+  const [gmReady,    setGmReady]    = useState(false)
+  const [selected,   setSelected]   = useState<string | null>(null)
+  const [info,       setInfo]       = useState<string | null>(null)
+  const [routes,     setRoutes]     = useState<DispatchedRoute[]>([])
+  const [routesFetched, setRoutesFetched] = useState(false)
+
+  const dayName = getTodayName()
   const hasRoute = ['Monday','Tuesday','Wednesday','Thursday'].includes(dayName)
 
-  useEffect(() => { loadGoogleMaps(() => setReady(true)) }, [])
+  // ── Load dispatched routes from Firestore (live) ───────────────────────────
+  useEffect(() => {
+    const q = query(
+      collection(db, 'dispatchRoutes'),
+      where('date', '==', todayStr())
+    )
+    return onSnapshot(q, snap => {
+      const loaded: DispatchedRoute[] = snap.docs.map(d => {
+        const data = d.data()
+        return { crewPin: data.crewPin, crewName: data.crewName, stops: data.stops ?? [] }
+      })
+
+      // If no dispatched routes today, fall back to hardcoded SCHEDULE
+      if (loaded.length === 0) {
+        
+        const dayRoutes = SCHEDULE[dayName] ?? {}
+        const fallback: DispatchedRoute[] = CREW
+          .filter(c => dayRoutes[c.name])
+          .map(c => ({
+            crewPin:  c.pin,
+            crewName: c.name,
+            stops:    dayRoutes[c.name].split('/').map((s: string) => s.trim()).filter(Boolean),
+          }))
+        setRoutes(fallback)
+      } else {
+        setRoutes(loaded)
+      }
+      setRoutesFetched(true)
+    })
+  }, [])
+
+  // ── Init map ───────────────────────────────────────────────────────────────
+  useEffect(() => {
+    loadGM(() => setGmReady(true))
+  }, [])
 
   useEffect(() => {
-    if (!ready || !mapRef.current) return
+    if (!gmReady || !mapRef.current) return
     const map = new google.maps.Map(mapRef.current, {
       center: { lat: 28.05, lng: -82.35 },
       zoom: 10,
       mapTypeId: 'roadmap',
       disableDefaultUI: true,
       zoomControl: true,
-      styles: [{ featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] }],
+      gestureHandling: 'greedy',
     })
-    mapInstance.current = map
-    renderMarkers(map, null)
-  }, [ready])
+    mapInst.current = map
+  }, [gmReady])
 
+  // ── Draw routes whenever routes or filter changes ──────────────────────────
   useEffect(() => {
-    if (!mapInstance.current) return
-    renderMarkers(mapInstance.current, selected)
-  }, [selected])
+    if (!gmReady || !mapInst.current || !routesFetched) return
+    drawRoutes(mapInst.current, selected)
+  }, [gmReady, routes, selected, routesFetched])
 
-  // Update live location dots whenever liveLocations changes
+  // ── Draw live location dots ────────────────────────────────────────────────
   useEffect(() => {
-    if (!mapInstance.current) return
+    if (!gmReady || !mapInst.current) return
     liveMarkers.current.forEach(m => m.setMap(null))
     liveMarkers.current = []
+
     liveLocations.forEach(loc => {
       const stale = (Date.now() - loc.updatedAt.getTime()) > 120_000
       const m = new google.maps.Marker({
         position: { lat: loc.lat, lng: loc.lng },
-        map: mapInstance.current!,
+        map: mapInst.current!,
         title: `${loc.userName} — ${loc.currentProperty ?? 'En route'}`,
         icon: {
           path: google.maps.SymbolPath.CIRCLE,
-          scale: 11,
+          scale: 12,
           fillColor: stale ? '#9ca3af' : loc.color,
           fillOpacity: 1,
-          strokeColor: '#ffffff',
+          strokeColor: '#fff',
           strokeWeight: 3,
         },
-        label: {
-          text: loc.userName[0],
-          color: '#ffffff',
-          fontSize: '11px',
-          fontWeight: 'bold',
-        },
-        zIndex: 200,
+        label: { text: loc.userName[0], color: '#fff', fontSize: '11px', fontWeight: 'bold' },
+        zIndex: 300,
       })
-      m.addListener('click', () => {
-        const mins = loc.clockInAt
-          ? Math.round((Date.now() - loc.clockInAt.getTime()) / 60000)
-          : null
-        setInfo(`${loc.userName} · ${loc.currentProperty ?? 'En route'} · ${mins !== null ? `${mins}m on clock` : ''}`)
+      const mins = loc.clockInAt
+        ? Math.round((Date.now() - loc.clockInAt.getTime()) / 60000)
+        : null
+      const iw = new google.maps.InfoWindow({
+        content: `<div style="font:600 13px sans-serif;padding:2px 4px;line-height:1.6">
+          <div>${loc.userName} <span style="color:#6b7280;font-weight:400">${loc.lm}</span></div>
+          <div style="color:#16a34a">${loc.currentProperty ?? 'En route'}</div>
+          ${mins !== null ? `<div style="color:#6b7280;font-size:11px">${mins}m on clock</div>` : ''}
+          ${stale ? '<div style="color:#f59e0b;font-size:11px">⚠️ Signal lost</div>' : ''}
+        </div>`
       })
+      m.addListener('click', () => { iw.open(mapInst.current!, m) })
       liveMarkers.current.push(m)
     })
-  }, [liveLocations, ready])
+  }, [liveLocations, gmReady])
 
-  function renderMarkers(map: google.maps.Map, filterCrew: string | null) {
-    markers.current.forEach(m => m.setMap(null))
-    lines.current.forEach(l => l.setMap(null))
-    markers.current = []
-    lines.current   = []
+  function drawRoutes(map: google.maps.Map, filterCrew: string | null) {
+    markerRefs.current.forEach(m => m.setMap(null))
+    lineRefs.current.forEach(r => r.setMap(null))
+    markerRefs.current = []
+    lineRefs.current   = []
 
-    const visible = filterCrew ? routes.filter(r => r.crew.name === filterCrew) : routes
-    const bounds  = new google.maps.LatLngBounds()
+    const visible = filterCrew
+      ? routes.filter(r => r.crewName === filterCrew)
+      : routes
+
+    const bounds = new google.maps.LatLngBounds()
+    const svc    = new google.maps.DirectionsService()
 
     visible.forEach(route => {
-      const validCoords = route.coords.filter(Boolean) as { lat: number; lng: number }[]
-      validCoords.forEach((coord, idx) => {
-        const isMulti = validCoords.length > 1
-        const prop    = route.properties[idx] ?? route.propertyRaw
-        if (isMulti && idx < validCoords.length - 1) {
-          const next = validCoords[idx + 1]
-          const line = new google.maps.Polyline({
-            path: [coord, next],
-            geodesic: true,
-            strokeColor: route.crew.color,
-            strokeOpacity: 0.7,
-            strokeWeight: 3,
-          })
-          line.setMap(map)
-          lines.current.push(line)
-        }
+      const crew       = CREW.find(c => c.pin === route.crewPin)!
+      const validStops = route.stops.filter(s => PROPERTY_COORDS[s])
+
+      if (!validStops.length) return
+
+      // Place numbered pins
+      validStops.forEach((stop, idx) => {
+        const coord = PROPERTY_COORDS[stop]
+        bounds.extend(coord)
         const m = new google.maps.Marker({
-          position: coord,
-          map,
-          title: `${route.crew.name} — ${prop}`,
+          position: coord, map,
+          title: `${route.crewName} — Stop ${idx + 1}: ${stop}`,
           icon: {
             path: google.maps.SymbolPath.CIRCLE,
-            scale: 10,
-            fillColor: route.crew.color,
+            scale: 12,
+            fillColor: crew.color,
             fillOpacity: 0.9,
-            strokeColor: '#ffffff',
+            strokeColor: '#fff',
             strokeWeight: 2,
           },
           label: {
-            text: route.crew.name[0],
-            color: route.crew.textColor ?? '#ffffff',
-            fontSize: '10px',
-            fontWeight: 'bold',
+            text: String(idx + 1),
+            color: crew.textColor ?? '#fff',
+            fontSize: '10px', fontWeight: 'bold',
           },
-          zIndex: 10,
+          zIndex: 50,
         })
-        m.addListener('click', () => setInfo(`${route.crew.name} · ${prop}`))
-        markers.current.push(m)
-        bounds.extend(coord)
+        const iw = new google.maps.InfoWindow({
+          content: `<div style="font:600 13px sans-serif;padding:2px 4px;line-height:1.6">
+            <span style="color:${crew.color}">■</span> ${route.crewName} · Stop ${idx + 1}
+            <br/><b>${stop}</b>
+            <br/><span style="color:#6b7280;font-size:11px">Dispatched route</span>
+          </div>`
+        })
+        m.addListener('click', () => iw.open(map, m))
+        markerRefs.current.push(m)
       })
+
+      // Draw real road route with DirectionsService
+      if (validStops.length >= 1) {
+        const dr = new google.maps.DirectionsRenderer({
+          map,
+          suppressMarkers: true,
+          preserveViewport: true,
+          polylineOptions: {
+            strokeColor:   crew.color,
+            strokeOpacity: 0.7,
+            strokeWeight:  4,
+          },
+        })
+        lineRefs.current.push(dr)
+
+        const origin  = validStops[0]
+        const dest    = validStops[validStops.length - 1]
+        const wpts    = validStops.slice(1, -1).map(s => ({
+          location: PROPERTY_COORDS[s], stopover: true,
+        }))
+
+        svc.route({
+          origin:             PROPERTY_COORDS[origin],
+          destination:        PROPERTY_COORDS[dest],
+          waypoints:          wpts,
+          optimizeWaypoints:  false,
+          travelMode:         google.maps.TravelMode.DRIVING,
+        }, (result, status) => {
+          if (status === 'OK' && result) dr.setDirections(result)
+        })
+      }
     })
 
-    if (!bounds.isEmpty()) map.fitBounds(bounds, { top: 60, right: 20, bottom: 20, left: 20 })
-  }
-
-  function fmtDist(km: number | null) {
-    if (!km) return '—'
-    return km < 1 ? `${Math.round(km * 1000)}m` : `${km.toFixed(1)} km`
-  }
-  function fmtEta(min: number | null) {
-    if (!min) return '—'
-    return min < 60 ? `~${min} min` : `~${Math.floor(min / 60)}h ${min % 60}m`
+    if (!bounds.isEmpty()) {
+      map.fitBounds(bounds, { top: 60, right: 20, bottom: 240, left: 20 })
+    }
   }
 
   return (
@@ -207,9 +240,10 @@ export function RouteMap({ onClose, liveLocations }: Props) {
             ←
           </button>
           <div>
-            <div className="font-bold text-lg">Route Map</div>
+            <div className="font-bold text-lg">Live Route Map</div>
             <div className="text-white/50 text-xs">
               {dayName} · {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+              {routes.length > 0 && ` · ${routes.length} routes dispatched`}
               {liveLocations.length > 0 && ` · ${liveLocations.length} crew live`}
             </div>
           </div>
@@ -218,24 +252,26 @@ export function RouteMap({ onClose, liveLocations }: Props) {
         {/* Crew filter tabs */}
         <div className="flex gap-2 mt-3 overflow-x-auto pb-1 no-scrollbar">
           <button onClick={() => setSelected(null)}
-            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition touch-manipulation ${
+            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold touch-manipulation ${
               selected === null ? 'bg-white text-gray-800' : 'bg-white/20 text-white'
             }`}>
             All Crew
           </button>
-          {CREW.map(c => (
-            <button key={c.pin}
-              onClick={() => setSelected(selected === c.name ? null : c.name)}
-              className="shrink-0 px-3 py-1.5 rounded-full text-xs font-bold transition touch-manipulation"
-              style={{
-                backgroundColor: selected === c.name ? c.color : c.color + '50',
-                color: '#fff',
-                border: `1.5px solid ${c.color}`,
-              }}>
-              {c.name}
-              {liveLocations.some(l => l.userName === c.name) && ' 🟢'}
-            </button>
-          ))}
+          {CREW.map(c => {
+            const isLive = liveLocations.some(l => l.userName === c.name)
+            return (
+              <button key={c.pin}
+                onClick={() => setSelected(selected === c.name ? null : c.name)}
+                className="shrink-0 px-3 py-1.5 rounded-full text-xs font-bold touch-manipulation"
+                style={{
+                  backgroundColor: selected === c.name ? c.color : c.color + '50',
+                  color: '#fff',
+                  border: `1.5px solid ${c.color}`,
+                }}>
+                {c.name}{isLive ? ' 🟢' : ''}
+              </button>
+            )
+          })}
         </div>
       </div>
 
@@ -250,7 +286,7 @@ export function RouteMap({ onClose, liveLocations }: Props) {
             </div>
           </div>
         )}
-        {!ready && hasRoute && (
+        {!gmReady && hasRoute && (
           <div className="absolute inset-0 flex items-center justify-center bg-gray-100 z-10">
             <div className="text-gray-400 text-sm animate-pulse">Loading map…</div>
           </div>
@@ -269,19 +305,21 @@ export function RouteMap({ onClose, liveLocations }: Props) {
       {/* Route cards */}
       <div className="bg-white border-t border-gray-100 overflow-y-auto" style={{ maxHeight: '36%' }}>
         <div className="px-4 pt-3 pb-1 text-xs font-bold text-gray-400 uppercase tracking-wider">
-          {selected ? `${selected}'s Route` : "Today's Routes"}
+          {selected ? `${selected}'s Route` : "Today's Dispatched Routes"}
+          {!routesFetched && <span className="ml-2 text-blue-400 animate-pulse">Loading…</span>}
         </div>
         <div className="pb-safe">
-          {(selected ? routes.filter(r => r.crew.name === selected) : routes).map(route => {
-            const live = liveLocations.find(l => l.userName === route.crew.name)
+          {(selected ? routes.filter(r => r.crewName === selected) : routes).map(route => {
+            const crew = CREW.find(c => c.pin === route.crewPin)!
+            const live = liveLocations.find(l => l.userName === route.crewName)
             return (
-              <div key={route.crew.pin}
+              <div key={route.crewPin}
                 className="flex items-start gap-3 px-4 py-3 border-b border-gray-50 last:border-0 active:bg-gray-50 touch-manipulation"
-                onClick={() => setSelected(selected === route.crew.name ? null : route.crew.name)}>
-                <div className="relative">
-                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0"
-                    style={{ backgroundColor: route.crew.color, color: route.crew.textColor ?? '#fff' }}>
-                    {route.crew.name[0]}
+                onClick={() => setSelected(selected === route.crewName ? null : route.crewName)}>
+                <div className="relative shrink-0">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
+                    style={{ backgroundColor: crew.color, color: crew.textColor ?? '#fff' }}>
+                    {route.crewName[0]}
                   </div>
                   {live && (
                     <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-green-400 rounded-full border-2 border-white" />
@@ -289,27 +327,35 @@ export function RouteMap({ onClose, liveLocations }: Props) {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-gray-800 text-sm">{route.crew.name}</span>
-                    <span className="text-gray-400 text-xs">{route.crew.lm}</span>
+                    <span className="font-bold text-gray-800 text-sm">{route.crewName}</span>
+                    <span className="text-gray-400 text-xs">{crew.lm}</span>
+                    {live && <span className="text-xs text-green-600 font-semibold">● Live</span>}
                   </div>
-                  {route.properties.map((prop, idx) => (
-                    <div key={idx} className="flex items-center gap-1.5 mt-0.5">
-                      <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: route.crew.color }} />
-                      <span className="text-sm text-gray-700 truncate">{prop}</span>
-                    </div>
-                  ))}
-                  {route.properties.length > 1 && (
-                    <div className="mt-1 text-xs text-gray-400">
-                      📏 {fmtDist(route.distanceKm)} · 🚗 {fmtEta(route.etaMinutes)}
-                    </div>
-                  )}
+                  {route.stops.map((stop, idx) => {
+                    const done = false // could be derived from shifts if needed
+                    return (
+                      <div key={idx} className="flex items-center gap-1.5 mt-0.5">
+                        <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: crew.color }} />
+                        <span className="text-sm text-gray-700 truncate">{stop}</span>
+                        {!PROPERTY_COORDS[stop] && (
+                          <span className="text-xs text-orange-400">(custom)</span>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
                 <div className="text-gray-300 text-xs shrink-0 mt-1">
-                  {selected === route.crew.name ? '✓' : '›'}
+                  {selected === route.crewName ? '✓' : '›'}
                 </div>
               </div>
             )
           })}
+          {routesFetched && routes.length === 0 && (
+            <div className="px-4 py-6 text-center text-gray-400 text-sm">
+              No routes dispatched today yet.
+              <br/>Open the Route Dispatcher to assign stops.
+            </div>
+          )}
         </div>
       </div>
     </div>

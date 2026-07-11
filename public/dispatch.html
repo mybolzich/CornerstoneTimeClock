@@ -8,10 +8,9 @@
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js'
     import { getFirestore, collection, doc, setDoc, onSnapshot,
-             query, where, Timestamp, getDocs }
+             query, where, Timestamp }
       from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js'
 
-    // ── Firebase ──────────────────────────────────────────────────────────────
     const app = initializeApp({
       apiKey:'AIzaSyDSIcTiBswVGF2oCSzUocAPEN3qi_muYls',
       authDomain:'serviroute-3ec0d.firebaseapp.com',
@@ -23,7 +22,7 @@
     const db = getFirestore(app)
 
     // ── Static data ───────────────────────────────────────────────────────────
-    const DEPOT = { name:'Cornerstone Office/Yard', lat:28.0500, lng:-82.2000, address:'Cornerstone LLC, Tampa, FL' }
+    const DEPOT = { lat:28.0500, lng:-82.2000, address:'Cornerstone Office/Yard, Tampa, FL' }
 
     const CREW = [
       { pin:'1001', name:'Neri',   lm:'LM1', color:'#16a34a', text:'#fff' },
@@ -33,677 +32,662 @@
       { pin:'1005', name:'Mario',  lm:'LM5', color:'#db2877', text:'#fff' },
     ]
 
-    const PROPERTIES = {
-      'Sienna Cove':       { lat:28.2106, lng:-82.3370 },
-      'Wilder Meadow':     { lat:28.0167, lng:-82.1142 },
-      'Woodlake Preserve': { lat:28.2189, lng:-82.4595 },
-      'Bridge Haven':      { lat:28.2400, lng:-82.3500 },
-      'Altera':            { lat:28.0167, lng:-82.1142 },
-      'Walden Pond':       { lat:28.0167, lng:-82.1142 },
-      'Walden Woods':      { lat:28.0167, lng:-82.1142 },
-      'Willow Walk':       { lat:27.5210, lng:-82.5740 },
-      'Golden Meadow':     { lat:27.5800, lng:-82.4250 },
-      'Cheyenne Preserve': { lat:27.8950, lng:-82.4150 },
-      'Cedar Mills':       { lat:27.8364, lng:-82.3265 },
-      'Birchwood':         { lat:28.2189, lng:-82.4595 },
-      'Trotters Crossing': { lat:28.2336, lng:-82.1812 },
-      'Belmont Glen':      { lat:27.7200, lng:-82.4356 },
-      'Victory Landing':   { lat:27.8550, lng:-82.3700 },
-      'Spring Rose':       { lat:27.8364, lng:-82.3265 },
-      'Boyette':           { lat:28.2400, lng:-82.3500 },
-      'Bell Lake':         { lat:28.2189, lng:-82.4595 },
-      'Camden Woods':      { lat:28.2400, lng:-82.3500 },
-      'Office / Yard':     { lat:28.0500, lng:-82.2000 },
+    const PROPS = {
+      'Sienna Cove':       {lat:28.2106,lng:-82.3370},
+      'Wilder Meadow':     {lat:28.0167,lng:-82.1142},
+      'Woodlake Preserve': {lat:28.2189,lng:-82.4595},
+      'Bridge Haven':      {lat:28.2400,lng:-82.3500},
+      'Altera':            {lat:28.0167,lng:-82.1142},
+      'Walden Pond':       {lat:28.0167,lng:-82.1142},
+      'Walden Woods':      {lat:28.0167,lng:-82.1142},
+      'Willow Walk':       {lat:27.5210,lng:-82.5740},
+      'Golden Meadow':     {lat:27.5800,lng:-82.4250},
+      'Cheyenne Preserve': {lat:27.8950,lng:-82.4150},
+      'Cedar Mills':       {lat:27.8364,lng:-82.3265},
+      'Birchwood':         {lat:28.2189,lng:-82.4595},
+      'Trotters Crossing': {lat:28.2336,lng:-82.1812},
+      'Belmont Glen':      {lat:27.7200,lng:-82.4356},
+      'Victory Landing':   {lat:27.8550,lng:-82.3700},
+      'Spring Rose':       {lat:27.8364,lng:-82.3265},
+      'Boyette':           {lat:28.2400,lng:-82.3500},
+      'Bell Lake':         {lat:28.2189,lng:-82.4595},
+      'Camden Woods':      {lat:28.2400,lng:-82.3500},
+      'Office / Yard':     {lat:28.0500,lng:-82.2000},
     }
 
     const SCHEDULE = {
-      Monday:    { Neri:'Sienna Cove', Mateos:'Woodlake Preserve', Erick:'Willow Walk', Luis:'Birchwood', Mario:'Walden Woods' },
-      Tuesday:   { Neri:'Sienna Cove', Mateos:'Bridge Haven', Erick:'Willow Walk / Golden Meadow', Luis:'Trotters Crossing', Mario:'Spring Rose' },
-      Wednesday: { Neri:'Sienna Cove', Mateos:'Bridge Haven', Erick:'Cheyenne Preserve', Luis:'Belmont Glen', Mario:'Boyette / Bell Lake' },
-      Thursday:  { Neri:'Wilder Meadow', Mateos:'Altera / Walden Pond', Erick:'Cedar Mills', Luis:'Victory Landing / Altera', Mario:'Camden Woods' },
+      Monday:    {Neri:'Sienna Cove',Mateos:'Woodlake Preserve',Erick:'Willow Walk',Luis:'Birchwood',Mario:'Walden Woods'},
+      Tuesday:   {Neri:'Sienna Cove',Mateos:'Bridge Haven',Erick:'Willow Walk / Golden Meadow',Luis:'Trotters Crossing',Mario:'Spring Rose'},
+      Wednesday: {Neri:'Sienna Cove',Mateos:'Bridge Haven',Erick:'Cheyenne Preserve',Luis:'Belmont Glen',Mario:'Boyette / Bell Lake'},
+      Thursday:  {Neri:'Wilder Meadow',Mateos:'Altera / Walden Pond',Erick:'Cedar Mills',Luis:'Victory Landing / Altera',Mario:'Camden Woods'},
     }
 
-    // ── State ─────────────────────────────────────────────────────────────────
-    let map = null
-    let gmReady = false
+    // ── App state ─────────────────────────────────────────────────────────────
+    let map = null, gmReady = false
     let selectedDate = new Date().toISOString().slice(0,10)
-    let routes = {}        // pin → { crewPin, crewName, date, stops[] }
-    let liveShifts = []
-    let markers = []       // all map markers
-    let routeLines = []    // polylines
-    let dirRenderers = []  // DirectionsRenderers
-    let activeTab = 'routes'  // 'routes' | 'crew'
-    let pendingRouteQueue = [] // queue route draws until GM ready
-    let unsubDispatch = null
+    let routes = {}       // pin → {crewPin,crewName,date,stops[],_saved}
+    let liveShifts = []   // from timeclock_shifts onSnapshot — LIVE
+    let liveLocations = []// from liveLocations onSnapshot — LIVE
+    let mapMarkers = [], mapRenderers = [], liveMarkers = []
+    let drawTimer = null  // debounce map redraws
+    let unsubDispatch = null, unsubShifts = null, unsubLive = null
+    let activeTab = 'routes'
+    let routesHaveServerData = false // track if Firestore returned any routes for this date
 
-    function dayName(dateStr) {
+    function dayName(d) {
       return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][
-        new Date(dateStr+'T12:00:00').getDay()]
+        new Date(d+'T12:00:00').getDay()]
     }
-    function todayStr() { return new Date().toISOString().slice(0,10) }
-    function parseStops(raw) { return (raw||'').split('/').map(s=>s.trim()).filter(Boolean) }
-    function dist(a,b) {
-      // haversine km
-      const R=6371, dLat=(b.lat-a.lat)*Math.PI/180, dLng=(b.lng-a.lng)*Math.PI/180
+    function parse(raw) { return (raw||'').split('/').map(s=>s.trim()).filter(Boolean) }
+    function distKm(a,b) {
+      const R=6371,dLat=(b.lat-a.lat)*Math.PI/180,dLng=(b.lng-a.lng)*Math.PI/180
       const x=Math.sin(dLat/2)**2+Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLng/2)**2
       return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x))
     }
 
-    // ── Sort stops by nearest-neighbor from depot ─────────────────────────────
-    function optimizeRoute(stops) {
-      const coords = stops.map(s => PROPERTIES[s] || DEPOT)
-      let remaining = stops.map((s,i)=>i), result = [], current = DEPOT
-      while (remaining.length) {
-        let best = -1, bestDist = Infinity
-        for (const i of remaining) {
-          const d = dist(current, coords[i])
-          if (d < bestDist) { bestDist = d; best = i }
-        }
-        result.push(stops[best])
-        current = coords[best]
-        remaining = remaining.filter(i=>i!==best)
+    // Nearest-neighbor sort from depot
+    function optimize(stops) {
+      if (stops.length <= 1) return stops
+      const get = s => PROPS[s]||DEPOT
+      let rem = [...stops.map((_,i)=>i)], result = [], cur = DEPOT
+      while (rem.length) {
+        let best=-1, bd=Infinity
+        for (const i of rem) { const d=distKm(cur,get(stops[i])); if(d<bd){bd=d;best=i} }
+        result.push(stops[best]); cur=get(stops[best]); rem=rem.filter(i=>i!==best)
       }
       return result
     }
 
-    // ── Google Maps loader ────────────────────────────────────────────────────
-    window.initGMap = function() {
+    // ── Google Maps ───────────────────────────────────────────────────────────
+    window.initGMap = () => {
       gmReady = true
-      const mapEl = document.getElementById('dispatch-map')
-      map = new google.maps.Map(mapEl, {
-        center:{lat:28.05,lng:-82.35}, zoom:10,
-        mapTypeId:'roadmap',
-        disableDefaultUI:false,
-        zoomControl:true,
-        streetViewControl:false,
-        mapTypeControl:true,
-        fullscreenControl:true,
+      const el = document.getElementById('dispatch-map')
+      map = new google.maps.Map(el, {
+        center:DEPOT, zoom:10, mapTypeId:'roadmap',
+        zoomControl:true, streetViewControl:false,
+        mapTypeControl:true, fullscreenControl:true,
       })
-      // Drop depot marker
+      // Depot marker
       new google.maps.Marker({
-        position:DEPOT,
-        map,
-        title:'Depot — '+DEPOT.name,
-        icon:{ path:google.maps.SymbolPath.CIRCLE, scale:14,
-               fillColor:'#0d1f3a', fillOpacity:1, strokeColor:'#fff', strokeWeight:3 },
-        label:{ text:'D', color:'#fff', fontWeight:'bold', fontSize:'11px' },
+        position:DEPOT, map, title:'Depot — Cornerstone Office/Yard',
+        icon:{path:google.maps.SymbolPath.CIRCLE,scale:14,
+              fillColor:'#0d1f3a',fillOpacity:1,strokeColor:'#fff',strokeWeight:3},
+        label:{text:'D',color:'#fff',fontWeight:'bold',fontSize:'11px'},
         zIndex:999,
       })
-      // Draw any pending routes
-      pendingRouteQueue.forEach(fn=>fn())
-      pendingRouteQueue=[]
+      document.getElementById('map-loading').style.display='none'
+      scheduleDraw()
     }
 
     function loadGM() {
       if (window.google?.maps) { window.initGMap(); return }
-      const s = document.createElement('script')
-      s.src = 'https://maps.googleapis.com/maps/api/js?key=AIzaSyAfrZbRXLbrQGNHrjobcamxKuXBUm94nR8&callback=initGMap&libraries=directions,geometry'
-      s.async = true; s.defer = true
-      document.head.appendChild(s)
+      const s=document.createElement('script')
+      s.src=`https://maps.googleapis.com/maps/api/js?key=AIzaSyAfrZbRXLbrQGNHrjobcamxKuXBUm94nR8&callback=initGMap&libraries=directions,geometry`
+      s.async=true; s.defer=true; document.head.appendChild(s)
     }
 
-    // ── Map drawing ───────────────────────────────────────────────────────────
-    function clearMapOverlays() {
-      markers.forEach(m=>m.setMap(null));       markers=[]
-      routeLines.forEach(l=>l.setMap(null));    routeLines=[]
-      dirRenderers.forEach(r=>r.setMap(null));  dirRenderers=[]
+    // Debounced draw — prevents hammering Directions API when adding multiple stops
+    function scheduleDraw() {
+      clearTimeout(drawTimer)
+      drawTimer = setTimeout(drawAll, 600)
     }
 
-    function drawAllRoutes() {
-      if (!gmReady) { pendingRouteQueue.push(drawAllRoutes); return }
-      clearMapOverlays()
+    function clearOverlays() {
+      mapMarkers.forEach(m=>m.setMap(null)); mapMarkers=[]
+      mapRenderers.forEach(r=>r.setMap(null)); mapRenderers=[]
+    }
+    function clearLiveMarkers() {
+      liveMarkers.forEach(m=>m.setMap(null)); liveMarkers=[]
+    }
 
-      const bounds = new google.maps.LatLngBounds()
+    function drawAll() {
+      if (!gmReady||!map) return
+      clearOverlays()
+      const bounds=new google.maps.LatLngBounds()
       bounds.extend(DEPOT)
+      const svc=new google.maps.DirectionsService()
 
-      CREW.forEach(crew => {
-        const route = routes[crew.pin]
-        if (!route || !route.stops.length) return
-        const stops = route.stops
+      CREW.forEach(crew=>{
+        const route=routes[crew.pin]
+        if (!route||!route.stops.length) return
 
-        // Place numbered property markers
-        stops.forEach((stop, idx) => {
-          const coord = PROPERTIES[stop]
-          if (!coord) return
+        // Place numbered stop markers
+        route.stops.forEach((stop,idx)=>{
+          const coord=PROPS[stop]; if(!coord) return
           bounds.extend(coord)
-          const m = new google.maps.Marker({
-            position: coord, map,
-            title: `${crew.name} — Stop ${idx+1}: ${stop}`,
-            icon:{
-              path: google.maps.SymbolPath.CIRCLE,
-              scale: 13,
-              fillColor: crew.color,
-              fillOpacity: 0.95,
-              strokeColor: '#fff',
-              strokeWeight: 2,
-            },
-            label:{
-              text: String(idx+1),
-              color: crew.text,
-              fontSize:'10px', fontWeight:'bold'
-            },
-            zIndex: 50,
+          const m=new google.maps.Marker({
+            position:coord,map,
+            title:`${crew.name} — Stop ${idx+1}: ${stop}`,
+            icon:{path:google.maps.SymbolPath.CIRCLE,scale:13,
+                  fillColor:crew.color,fillOpacity:0.95,strokeColor:'#fff',strokeWeight:2},
+            label:{text:String(idx+1),color:crew.text,fontSize:'10px',fontWeight:'bold'},
+            zIndex:50,
           })
-          const iw = new google.maps.InfoWindow({
-            content:`<div style="font:600 13px sans-serif;padding:2px">
-              <span style="color:${crew.color}">■</span>
-              ${crew.name} · Stop ${idx+1}<br>
-              <b>${stop}</b>
+          const iw=new google.maps.InfoWindow({
+            content:`<div style="font:600 13px sans-serif;padding:4px;line-height:1.7">
+              <div><span style="color:${crew.color}">■</span> ${crew.name} · Stop ${idx+1}</div>
+              <div style="font-size:15px">${stop}</div>
+              ${idx===0?`<div style="color:#6b7280;font-size:11px">📍 First stop from depot</div>`:''}
             </div>`
           })
-          m.addListener('click', ()=>{ iw.open(map,m) })
-          markers.push(m)
+          m.addListener('click',()=>iw.open(map,m))
+          mapMarkers.push(m)
         })
 
-        // Draw route line: Depot → stops[0] → stops[1] … → last stop
-        // Use DirectionsService for real road routing
-        const waypoints = stops.slice(0,-1).map(s => ({
-          location: PROPERTIES[s] || DEPOT,
-          stopover: true,
-        }))
-        const finalStop = PROPERTIES[stops[stops.length-1]] || DEPOT
-
-        const dr = new google.maps.DirectionsRenderer({
-          map,
-          suppressMarkers: true,
-          preserveViewport: true,
-          polylineOptions:{
-            strokeColor: crew.color,
-            strokeOpacity: 0.7,
-            strokeWeight: 4,
-          }
+        // Road route: Depot → stop[0] → … → stop[last]
+        const validStops=route.stops.filter(s=>PROPS[s])
+        if (validStops.length===0) return
+        const dr=new google.maps.DirectionsRenderer({
+          map, suppressMarkers:true, preserveViewport:true,
+          polylineOptions:{strokeColor:crew.color,strokeOpacity:0.7,strokeWeight:4}
         })
-        dirRenderers.push(dr)
-
-        const svc = new google.maps.DirectionsService()
+        mapRenderers.push(dr)
         svc.route({
-          origin: DEPOT,
-          destination: finalStop,
-          waypoints: waypoints,
-          optimizeWaypoints: false,
-          travelMode: google.maps.TravelMode.DRIVING,
-        }, (result, status) => {
-          if (status === 'OK') {
+          origin:DEPOT,
+          destination:PROPS[validStops[validStops.length-1]],
+          waypoints:validStops.slice(0,-1).map(s=>({location:PROPS[s],stopover:true})),
+          optimizeWaypoints:false,
+          travelMode:google.maps.TravelMode.DRIVING,
+        },(result,status)=>{
+          if(status==='OK'&&result){
             dr.setDirections(result)
-            // Update ETA in UI
-            const legs = result.routes[0].legs
-            const totalDist = legs.reduce((sum,l)=>sum+(l.distance?.value||0),0)
-            const totalDur  = legs.reduce((sum,l)=>sum+(l.duration?.value||0),0)
-            const distKm = (totalDist/1000).toFixed(1)
-            const durMin = Math.round(totalDur/60)
-            const eta = document.getElementById(`eta-${crew.pin}`)
-            if (eta) eta.textContent = `${distKm} km · ${durMin} min driving`
+            const legs=result.routes[0].legs
+            const km=(legs.reduce((s,l)=>s+(l.distance?.value||0),0)/1000).toFixed(1)
+            const min=Math.round(legs.reduce((s,l)=>s+(l.duration?.value||0),0)/60)
+            const el=document.getElementById(`eta-${crew.pin}`)
+            if(el) el.textContent=`🚗 ${km} km · ${min} min from depot`
           }
         })
       })
 
-      // Fit map to all routes
-      if (!bounds.isEmpty()) map.fitBounds(bounds, {top:60,right:40,bottom:40,left:40})
+      if (!bounds.isEmpty()) map.fitBounds(bounds,{top:60,right:40,bottom:200,left:40})
     }
 
-    // ── Firestore ─────────────────────────────────────────────────────────────
-    function subscribeDate(date) {
+    function drawLiveLocations() {
+      if (!gmReady||!map) return
+      clearLiveMarkers()
+      liveLocations.forEach(loc=>{
+        const stale=(Date.now()-new Date(loc.updatedAt?.seconds*1000||0).getTime())>120000
+        const m=new google.maps.Marker({
+          position:{lat:loc.lat,lng:loc.lng},map,
+          title:`${loc.userName} — ${loc.currentProperty||'En route'}`,
+          icon:{path:google.maps.SymbolPath.CIRCLE,scale:11,
+                fillColor:stale?'#9ca3af':loc.color,fillOpacity:1,
+                strokeColor:'#fff',strokeWeight:3},
+          label:{text:loc.userName[0],color:'#fff',fontSize:'10px',fontWeight:'bold'},
+          zIndex:200,
+        })
+        const mins=loc.clockInAt
+          ? Math.round((Date.now()-new Date(loc.clockInAt.seconds*1000).getTime())/60000)
+          : null
+        const iw=new google.maps.InfoWindow({
+          content:`<div style="font:600 13px sans-serif;padding:4px;line-height:1.7">
+            <div>${loc.userName} <span style="color:#6b7280;font-weight:400">${loc.lm||''}</span></div>
+            <div style="color:#16a34a">${loc.currentProperty||'En route'}</div>
+            ${mins!==null?`<div style="color:#6b7280;font-size:11px">${mins}m on clock</div>`:''}
+            ${stale?`<div style="color:#f59e0b;font-size:11px">⚠️ Signal lost</div>`:''}
+          </div>`
+        })
+        m.addListener('click',()=>iw.open(map,m))
+        liveMarkers.push(m)
+      })
+    }
+
+    // ── Firestore subscriptions — all real-time ──────────────────────────────
+    function subscribeAll(date) {
+      // Unsubscribe previous listeners
       if (unsubDispatch) unsubDispatch()
-      const q = query(collection(db,'dispatchRoutes'), where('date','==',date))
-      unsubDispatch = onSnapshot(q, snap => {
-        snap.docs.forEach(d => {
-          const data = d.data()
-          if (!routes[data.crewPin] || routes[data.crewPin]._fromServer) {
-            routes[data.crewPin] = { ...data, _fromServer:true }
-          }
-        })
+      if (unsubShifts)   unsubShifts()
+      if (unsubLive)     unsubLive()
+
+      // 1. Dispatch routes (live)
+      routesHaveServerData = false
+      const qd=query(collection(db,'dispatchRoutes'),where('date','==',date))
+      unsubDispatch=onSnapshot(qd,snap=>{
+        routesHaveServerData = true
+        if (!snap.empty) {
+          snap.docs.forEach(d=>{
+            const data=d.data()
+            // Merge: only overwrite if we don't have local unsaved edits
+            if (!routes[data.crewPin]||routes[data.crewPin]._saved) {
+              routes[data.crewPin]={...data,_saved:true}
+            }
+          })
+        } else {
+          // No saved routes for this date — auto-load template
+          const day=dayName(date)
+          if (SCHEDULE[day]) loadTemplate(date, /*silent=*/true)
+        }
         renderSidebar()
-        drawAllRoutes()
-        updatePlanSummary()
+        scheduleDraw()
+        updateSummary()
       })
 
-      // Live shift status
-      const sq = query(collection(db,'timeclock_shifts'), where('date','==',date))
-      getDocs(sq).then(snap => {
-        liveShifts = snap.docs.map(d=>d.data())
-        renderCrewPanel()
+      // 2. Live shifts (real-time — was getDocs before, now onSnapshot) ← FIX
+      const qs=query(collection(db,'timeclock_shifts'),where('date','==',date))
+      unsubShifts=onSnapshot(qs,snap=>{
+        liveShifts=snap.docs.map(d=>d.data())
+        renderSidebar()   // refresh crew status badges
+        updateSummary()
+      })
+
+      // 3. Live locations (real-time) ← NEW in dispatcher
+      const ql=query(collection(db,'liveLocations'),where('active','==',true))
+      unsubLive=onSnapshot(ql,snap=>{
+        const now=Date.now()
+        liveLocations=snap.docs.map(d=>d.data()).filter(l=>{
+          const ts=l.updatedAt?.seconds ? l.updatedAt.seconds*1000 : 0
+          return now-ts < 5*60*1000
+        })
+        drawLiveLocations()
+        renderSidebar() // refresh dots in crew status tab
       })
     }
 
-    async function saveRoute(pin) {
-      const route = routes[pin]
-      if (!route) return
-      const ref = doc(db,'dispatchRoutes',`${pin}_${route.date}`)
-      await setDoc(ref, {
-        crewPin:route.crewPin, crewName:route.crewName,
-        date:route.date, stops:route.stops, savedAt:Timestamp.now()
-      })
-      routes[pin]._fromServer = true
-      showToast(`${route.crewName}'s route saved & dispatched ✓`)
-      renderSidebar()
+    // ── Crew status helpers ───────────────────────────────────────────────────
+    function crewStatus(name) {
+      // Check live location first (most current)
+      const live=liveLocations.find(l=>l.userName===name)
+      if (live) {
+        const stale=(Date.now()-(live.updatedAt?.seconds*1000||0))>120000
+        if (!stale) return {label:'On Clock 🟢',color:'#16a34a'}
+      }
+      // Fall back to shift data
+      if (liveShifts.some(s=>s.crewName===name&&!s.clockOut))
+        return {label:'On Clock',color:'#16a34a'}
+      if (liveShifts.some(s=>s.crewName===name))
+        return {label:'Done',color:'#6b7280'}
+      return {label:'Not In',color:'#dc2626'}
     }
 
-    async function saveAll() {
-      for (const c of CREW) { if (routes[c.pin]?.stops?.length) await saveRoute(c.pin) }
-      showToast('All routes saved & dispatched ✓','green')
+    function hoursToday(name) {
+      const mins=liveShifts.filter(s=>s.crewName===name&&s.durationMinutes)
+                            .reduce((sum,s)=>sum+(s.durationMinutes||0),0)
+      if (!mins) return ''
+      return `${Math.floor(mins/60)}h ${mins%60}m`
     }
 
     // ── Route operations ──────────────────────────────────────────────────────
-    function ensureRoute(pin) {
-      const c = CREW.find(x=>x.pin===pin)
-      if (!routes[pin]) routes[pin] = { crewPin:pin, crewName:c.name, date:selectedDate, stops:[], _fromServer:false }
+    function ensure(pin) {
+      const c=CREW.find(x=>x.pin===pin)
+      if (!routes[pin]) routes[pin]={crewPin:pin,crewName:c.name,date:selectedDate,stops:[],_saved:false}
       return routes[pin]
     }
-    function addStop(pin, stop) {
-      if (!stop) return
-      const r = ensureRoute(pin)
-      if (!r.stops.includes(stop)) { r.stops.push(stop); r._fromServer=false }
-      renderSidebar(); drawAllRoutes(); updatePlanSummary()
+    function addStop(pin,stop) {
+      if(!stop) return
+      const r=ensure(pin)
+      if(!r.stops.includes(stop)){r.stops.push(stop);r._saved=false}
+      renderSidebar();scheduleDraw();updateSummary()
     }
-    function removeStop(pin, idx) {
-      ensureRoute(pin).stops.splice(idx,1)
-      routes[pin]._fromServer=false
-      renderSidebar(); drawAllRoutes(); updatePlanSummary()
+    function removeStop(pin,idx) {
+      ensure(pin).stops.splice(idx,1); routes[pin]._saved=false
+      renderSidebar();scheduleDraw();updateSummary()
     }
     function moveStop(pin,idx,dir) {
-      const stops=ensureRoute(pin).stops
-      const swap=idx+dir
-      if(swap<0||swap>=stops.length) return
-      ;[stops[idx],stops[swap]]=[stops[swap],stops[idx]]
-      routes[pin]._fromServer=false
-      renderSidebar(); drawAllRoutes(); updatePlanSummary()
+      const s=ensure(pin).stops,sw=idx+dir
+      if(sw<0||sw>=s.length) return
+      ;[s[idx],s[sw]]=[s[sw],s[idx]]; routes[pin]._saved=false
+      renderSidebar();scheduleDraw();updateSummary()
     }
-    function optimizeRouteForCrew(pin) {
-      const r = ensureRoute(pin)
-      r.stops = optimizeRoute(r.stops)
-      r._fromServer=false
-      renderSidebar(); drawAllRoutes(); updatePlanSummary()
-      showToast(`${r.crewName}'s route optimized from depot`)
+    function optimizeCrew(pin) {
+      const r=ensure(pin); r.stops=optimize(r.stops); r._saved=false
+      renderSidebar();scheduleDraw();updateSummary()
+      toast(`${r.crewName}'s route optimized from depot ⚡`)
     }
     function optimizeAll() {
-      CREW.forEach(c=>{ if(routes[c.pin]?.stops?.length) optimizeRouteForCrew(c.pin) })
+      CREW.forEach(c=>{if(routes[c.pin]?.stops?.length) optimizeCrew(c.pin)})
     }
-    function loadTemplate(date) {
-      const day = dayName(date)
-      const tpl = SCHEDULE[day]
-      if (!tpl) { showToast('No template for '+day,'amber'); return }
+    function loadTemplate(date, silent=false) {
+      const day=dayName(date), tpl=SCHEDULE[day]
+      if (!tpl) { if(!silent) toast('No template for '+day,'amber'); return }
       CREW.forEach(c=>{
-        const raw = tpl[c.name]||''
-        routes[c.pin] = { crewPin:c.pin, crewName:c.name, date, stops:parseStops(raw), _fromServer:false }
+        // Only load if no local edits exist or route is empty
+        if (!routes[c.pin]||routes[c.pin].stops.length===0||routes[c.pin]._saved) {
+          routes[c.pin]={crewPin:c.pin,crewName:c.name,date,stops:parse(tpl[c.name]||''),_saved:false}
+        }
       })
-      renderSidebar(); drawAllRoutes(); updatePlanSummary()
-      showToast('Template loaded — '+day)
+      renderSidebar();scheduleDraw();updateSummary()
+      if(!silent) toast('Template loaded — '+day)
     }
     function clearAll() {
-      CREW.forEach(c=>{ if(routes[c.pin]) { routes[c.pin].stops=[]; routes[c.pin]._fromServer=false } })
-      renderSidebar(); drawAllRoutes(); updatePlanSummary()
+      CREW.forEach(c=>{routes[c.pin]={crewPin:c.pin,crewName:c.name,date:selectedDate,stops:[],_saved:false}})
+      renderSidebar();scheduleDraw();updateSummary()
     }
 
-    // ── Plan Summary ──────────────────────────────────────────────────────────
-    function updatePlanSummary() {
-      const totalStops = CREW.reduce((sum,c)=>sum+(routes[c.pin]?.stops?.length||0),0)
-      const crewsActive = CREW.filter(c=>routes[c.pin]?.stops?.length>0).length
-      document.getElementById('summary-stops').textContent   = totalStops
-      document.getElementById('summary-crews').textContent   = crewsActive+'/5'
-      document.getElementById('summary-date').textContent    = selectedDate
-      document.getElementById('summary-day').textContent     = dayName(selectedDate)||'—'
-      document.getElementById('summary-depot').textContent   = DEPOT.name
+    // ── Save ──────────────────────────────────────────────────────────────────
+    async function saveRoute(pin) {
+      const r=routes[pin]; if(!r) return
+      const ref=doc(db,'dispatchRoutes',`${pin}_${r.date}`)
+      await setDoc(ref,{crewPin:r.crewPin,crewName:r.crewName,date:r.date,stops:r.stops,savedAt:Timestamp.now()})
+      routes[pin]._saved=true
+      renderSidebar()
+      toast(`${r.crewName}'s route dispatched ✓`)
+    }
+    async function saveAll() {
+      for(const c of CREW){ if(routes[c.pin]?.stops?.length) await saveRoute(c.pin) }
+      toast('All routes saved & dispatched ✓','green')
     }
 
-    // ── Render sidebar route list ─────────────────────────────────────────────
+    // ── Summary ───────────────────────────────────────────────────────────────
+    function updateSummary() {
+      const totalStops=CREW.reduce((s,c)=>s+(routes[c.pin]?.stops?.length||0),0)
+      const active=CREW.filter(c=>routes[c.pin]?.stops?.length>0).length
+      const onClock=CREW.filter(c=>crewStatus(c.name).color==='#16a34a').length
+      document.getElementById('s-stops').textContent=totalStops
+      document.getElementById('s-crews').textContent=active+'/5'
+      document.getElementById('s-onclock').textContent=onClock
+      document.getElementById('s-day').textContent=dayName(selectedDate)||'—'
+      document.getElementById('s-date').textContent=selectedDate
+    }
+
+    // ── Render sidebar ────────────────────────────────────────────────────────
     function renderSidebar() {
-      const container = document.getElementById('route-list')
-      if (!container) return
-      container.innerHTML = CREW.map(crew => {
-        const route = routes[crew.pin] || { stops:[] }
-        const stops = route.stops
-        const status = crewStatus(crew.name)
-        const unsaved = !route._fromServer
+      if (activeTab==='routes') renderRoutes()
+      else renderCrewStatus()
+    }
 
+    function renderRoutes() {
+      const el=document.getElementById('pane-routes'); if(!el) return
+      el.innerHTML=CREW.map(crew=>{
+        const r=routes[crew.pin]||{stops:[]}
+        const status=crewStatus(crew.name)
+        const unsaved=!r._saved&&r.stops.length>0
         return `
-        <div class="crew-block border border-gray-100 rounded-xl overflow-hidden mb-3">
-          <!-- Crew header -->
-          <div class="flex items-center gap-2 px-3 py-2.5 bg-white border-b border-gray-50">
+        <div class="border border-gray-100 rounded-xl overflow-hidden mb-3 bg-white">
+          <div class="flex items-center gap-2 px-3 py-2.5 border-b border-gray-50">
             <div class="w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shrink-0"
               style="background:${crew.color};color:${crew.text}">${crew.name[0]}</div>
             <div class="flex-1 min-w-0">
-              <div class="font-bold text-gray-800 text-sm leading-tight">${crew.name}
+              <div class="font-bold text-gray-800 text-sm">${crew.name}
                 <span class="text-gray-400 font-normal text-xs ml-1">${crew.lm}</span>
               </div>
-              <div class="text-xs" style="color:${status.color}">${status.label}</div>
+              <div class="text-xs font-semibold" style="color:${status.color}">${status.label}</div>
             </div>
             <div class="flex gap-1 shrink-0">
-              <button onclick="optimizeRouteForCrew('${crew.pin}')"
-                title="Optimize from depot"
-                class="h-7 px-2 rounded bg-blue-50 text-blue-600 text-xs font-semibold hover:bg-blue-100">⚡</button>
+              <button onclick="optimizeCrew('${crew.pin}')" title="Optimize from depot"
+                class="h-7 px-2 rounded bg-blue-50 text-blue-600 text-xs font-bold hover:bg-blue-100">⚡</button>
               <button onclick="saveRoute('${crew.pin}')"
-                class="h-7 px-2 rounded text-xs font-bold text-white hover:opacity-90"
-                style="background:${unsaved?crew.color:'#6b7280'}">${unsaved?'Save':'✓'}</button>
+                class="h-7 px-3 rounded text-xs font-bold text-white transition"
+                style="background:${unsaved?crew.color:'#9ca3af'}"
+                ${!r.stops.length?'disabled':''}>
+                ${r._saved?'✓ Saved':'Dispatch'}
+              </button>
             </div>
           </div>
-
-          <!-- ETA row -->
-          <div id="eta-${crew.pin}" class="px-3 py-1 text-xs text-gray-400 bg-gray-50 border-b border-gray-100">
-            ${stops.length?'Calculating route…':'No stops assigned'}
+          <div id="eta-${crew.pin}" class="px-3 py-1.5 text-xs text-gray-400 bg-gray-50 border-b border-gray-100">
+            ${r.stops.length?'Calculating route…':'No stops — add below'}
           </div>
-
-          <!-- Stop list -->
-          ${stops.length ? `
+          ${r.stops.length ? `
           <div class="divide-y divide-gray-50">
-            ${stops.map((stop,i)=>`
-            <div class="flex items-center gap-2 px-3 py-2 bg-white group hover:bg-gray-50">
+            ${r.stops.map((stop,i)=>`
+            <div class="flex items-center gap-2 px-3 py-2 group hover:bg-gray-50">
               <div class="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0"
                 style="background:${crew.color}">${i+1}</div>
-              <div class="flex-1 text-xs text-gray-700 truncate font-medium">${stop}</div>
-              <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onclick="moveStop('${crew.pin}',${i},-1)" ${i===0?'disabled':''} class="h-6 w-6 flex items-center justify-center rounded text-gray-400 hover:bg-gray-200 disabled:opacity-20">↑</button>
-                <button onclick="moveStop('${crew.pin}',${i},1)" ${i===stops.length-1?'disabled':''} class="h-6 w-6 flex items-center justify-center rounded text-gray-400 hover:bg-gray-200 disabled:opacity-20">↓</button>
-                <button onclick="removeStop('${crew.pin}',${i})" class="h-6 w-6 flex items-center justify-center rounded text-red-400 hover:bg-red-50">✕</button>
+              <div class="flex-1 text-xs font-medium text-gray-700 truncate">${stop}</div>
+              <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                <button onclick="moveStop('${crew.pin}',${i},-1)" ${i===0?'disabled':''} class="h-6 w-5 rounded text-gray-400 hover:bg-gray-200 disabled:opacity-20 text-sm">↑</button>
+                <button onclick="moveStop('${crew.pin}',${i},1)" ${i===r.stops.length-1?'disabled':''} class="h-6 w-5 rounded text-gray-400 hover:bg-gray-200 disabled:opacity-20 text-sm">↓</button>
+                <button onclick="removeStop('${crew.pin}',${i})" class="h-6 w-5 rounded text-red-400 hover:bg-red-50 text-sm">✕</button>
               </div>
             </div>`).join('')}
           </div>` : `
-          <div class="px-3 py-3 text-xs text-gray-400 italic text-center bg-white">No stops — add below</div>`}
-
-          <!-- Add stop -->
-          <div class="flex gap-1.5 px-3 py-2 bg-gray-50 border-t border-gray-100">
-            <select id="sel-${crew.pin}" onchange=""
-              class="flex-1 text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-1"
-              style="--tw-ring-color:${crew.color}">
-              <option value="">＋ Add property…</option>
-              ${Object.keys(PROPERTIES).map(p=>`<option value="${p}">${p}</option>`).join('')}
-            </select>
-            <button onclick="addFromSelect('${crew.pin}')"
-              class="h-7 px-2.5 rounded-lg text-white text-xs font-bold hover:opacity-90 shrink-0"
-              style="background:${crew.color}">Add</button>
-          </div>
-          <!-- Custom property -->
-          <div class="flex gap-1.5 px-3 pb-2 bg-gray-50">
-            <input id="custom-${crew.pin}" type="text" placeholder="Custom address or property…"
-              class="flex-1 text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
+          <div class="px-3 py-3 text-xs text-gray-400 italic text-center">No stops yet</div>`}
+          <div class="px-3 py-2 bg-gray-50 border-t border-gray-100 space-y-1.5">
+            <div class="flex gap-1.5">
+              <select id="sel-${crew.pin}"
+                class="flex-1 text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
+                <option value="">＋ Add property…</option>
+                ${Object.keys(PROPS).map(p=>`<option value="${p}">${p}</option>`).join('')}
+              </select>
+              <button onclick="addFromSel('${crew.pin}')"
+                class="h-7 px-2.5 rounded-lg text-white text-xs font-bold hover:opacity-90"
+                style="background:${crew.color}">Add</button>
+            </div>
+            <input id="cust-${crew.pin}" type="text" placeholder="Custom address or property name…"
+              class="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white"
               onkeydown="if(event.key==='Enter') addCustom('${crew.pin}')"/>
-            <button onclick="addCustom('${crew.pin}')"
-              class="h-7 px-2 rounded-lg border border-gray-200 text-gray-500 text-xs hover:bg-gray-100 shrink-0">+</button>
           </div>
         </div>`
       }).join('')
     }
 
-    function renderCrewPanel() {
-      const container = document.getElementById('crew-panel')
-      if (!container) return
-      container.innerHTML = `
-        <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Crew Status — ${selectedDate}</div>
+    function renderCrewStatus() {
+      const el=document.getElementById('pane-crew'); if(!el) return
+      el.innerHTML=`
+        <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
+          Live Crew Status — ${selectedDate}
+          <span class="text-green-500 ml-2 font-normal normal-case">● real-time</span>
+        </div>
         ${CREW.map(c=>{
-          const s = crewStatus(c.name)
-          const shift = liveShifts.find(x=>x.crewName===c.name&&!x.clockOut)
-          const hours = liveShifts.filter(x=>x.crewName===c.name&&x.durationMinutes)
-                          .reduce((sum,x)=>sum+(x.durationMinutes||0),0)
+          const s=crewStatus(c.name)
+          const shift=liveShifts.find(x=>x.crewName===c.name&&!x.clockOut)
+          const h=hoursToday(c.name)
+          const live=liveLocations.find(l=>l.userName===c.name)
           return `
           <div class="flex items-center gap-3 py-2.5 border-b border-gray-100 last:border-0">
-            <div class="w-10 h-10 rounded-full flex items-center justify-center font-bold shrink-0"
-              style="background:${c.color};color:${c.text}">${c.name[0]}</div>
+            <div class="relative">
+              <div class="w-10 h-10 rounded-full flex items-center justify-center font-bold shrink-0"
+                style="background:${c.color};color:${c.text}">${c.name[0]}</div>
+              ${live?`<div class="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-400 rounded-full border-2 border-white"></div>`:''}
+            </div>
             <div class="flex-1 min-w-0">
-              <div class="font-semibold text-gray-800 text-sm">${c.name} <span class="text-gray-400 text-xs font-normal">${c.lm}</span></div>
-              <div class="text-xs" style="color:${s.color}">${s.label}${shift?' · '+shift.property:''}</div>
-              ${hours>0?`<div class="text-xs text-gray-400">${Math.floor(hours/60)}h ${hours%60}m logged</div>`:''}
+              <div class="font-semibold text-gray-800 text-sm">${c.name}
+                <span class="text-gray-400 text-xs font-normal ml-1">${c.lm}</span>
+              </div>
+              <div class="text-xs font-semibold" style="color:${s.color}">${s.label}</div>
+              ${shift?`<div class="text-xs text-gray-500">${shift.property}</div>`:''}
+              ${h?`<div class="text-xs text-gray-400">${h} logged</div>`:''}
             </div>
             <div class="text-xs font-semibold px-2 py-1 rounded-full shrink-0"
-              style="background:${s.color}20;color:${s.color}">${s.label}</div>
+              style="background:${s.color}20;color:${s.color}">${s.label.split(' ')[0]}</div>
           </div>`
         }).join('')}`
     }
 
-    function crewStatus(name) {
-      const shift = liveShifts.find(s=>s.crewName===name&&!s.clockOut)
-      if (shift) return { label:'On Clock', color:'#16a34a' }
-      if (liveShifts.some(s=>s.crewName===name)) return { label:'Done', color:'#6b7280' }
-      return { label:'Not In', color:'#dc2626' }
-    }
-
-    // ── Expose to HTML ────────────────────────────────────────────────────────
-    window.addFromSelect = pin => {
-      const sel = document.getElementById(`sel-${pin}`)
-      if (sel?.value) { addStop(pin, sel.value); sel.value='' }
-    }
-    window.addCustom = pin => {
-      const inp = document.getElementById(`custom-${pin}`)
-      if (inp?.value.trim()) { addStop(pin, inp.value.trim()); inp.value='' }
-    }
+    // ── Expose to HTML handlers ───────────────────────────────────────────────
+    window.addFromSel = pin => { const s=document.getElementById(`sel-${pin}`); if(s?.value){addStop(pin,s.value);s.value=''} }
+    window.addCustom  = pin => { const i=document.getElementById(`cust-${pin}`); if(i?.value.trim()){addStop(pin,i.value.trim());i.value=''} }
     window.moveStop   = moveStop
     window.removeStop = removeStop
     window.saveRoute  = saveRoute
     window.saveAll    = saveAll
-    window.optimizeRouteForCrew = optimizeRouteForCrew
-
-    window.handleDateChange = val => {
-      selectedDate = val
-      routes = {}
-      document.getElementById('day-badge').textContent = dayName(val)||'—'
-      subscribeDate(val)
-      updatePlanSummary()
-    }
-    window.loadTemplate = () => loadTemplate(selectedDate)
+    window.optimizeCrew = optimizeCrew
     window.optimizeAll  = optimizeAll
     window.clearAll     = clearAll
-    window.switchTab    = tab => {
-      activeTab = tab
-      document.getElementById('tab-routes').className = tab==='routes' ? TAB_ACTIVE : TAB_IDLE
-      document.getElementById('tab-crew').className   = tab==='crew'   ? TAB_ACTIVE : TAB_IDLE
-      document.getElementById('pane-routes').style.display = tab==='routes' ? '' : 'none'
-      document.getElementById('pane-crew').style.display   = tab==='crew'   ? '' : 'none'
+    window.switchTab = tab => {
+      activeTab=tab
+      const RA='border-b-2 border-blue-600 text-blue-600', RI='text-gray-400 hover:text-gray-600'
+      document.getElementById('tab-r').className=`flex-1 py-2 text-xs font-bold bg-white ${tab==='routes'?RA:RI}`
+      document.getElementById('tab-c').className=`flex-1 py-2 text-xs font-semibold bg-white ${tab==='crew'?RA:RI}`
+      document.getElementById('pane-routes').style.display=tab==='routes'?'':'none'
+      document.getElementById('pane-crew').style.display  =tab==='crew'  ?'':'none'
+      renderSidebar()
     }
-    window.loadDay = day => {
-      const target = {Monday:1,Tuesday:2,Wednesday:3,Thursday:4}[day]
-      const now = new Date(), curr = now.getDay()
-      let diff = target-curr; if(diff<=0) diff+=7
-      const d=new Date(now); d.setDate(d.getDate()+diff)
-      const ds=d.toISOString().slice(0,10)
-      document.getElementById('date-input').value=ds
-      selectedDate=ds
+    window.handleDate = val => {
+      selectedDate=val
       routes={}
+      document.getElementById('day-badge').textContent=dayName(val)||'—'
+      subscribeAll(val)
+      updateSummary()
+    }
+    window.loadTemplate = () => loadTemplate(selectedDate)
+    window.loadDay = day => {
+      const t={Monday:1,Tuesday:2,Wednesday:3,Thursday:4}[day]
+      const n=new Date(),c=n.getDay(); let d=t-c; if(d<=0)d+=7
+      const dt=new Date(n); dt.setDate(dt.getDate()+d)
+      const ds=dt.toISOString().slice(0,10)
+      document.getElementById('date-input').value=ds
+      selectedDate=ds; routes={}
       document.getElementById('day-badge').textContent=day
-      subscribeDate(ds)
-      loadTemplate(ds)
-      updatePlanSummary()
+      subscribeAll(ds)
+      updateSummary()
     }
 
-    const TAB_ACTIVE = 'flex-1 py-2 text-xs font-bold border-b-2 border-blue-600 text-blue-600 bg-white'
-    const TAB_IDLE   = 'flex-1 py-2 text-xs font-semibold text-gray-400 hover:text-gray-600 bg-white'
-
-    function showToast(msg, color='green') {
+    function toast(msg,color='green') {
       const t=document.getElementById('toast')
       t.textContent=msg
-      t.style.background = color==='amber'?'#d97706':color==='red'?'#dc2626':'#16a34a'
-      t.style.opacity='1'
-      clearTimeout(t._tid)
-      t._tid=setTimeout(()=>{t.style.opacity='0'},3000)
+      t.style.background=color==='amber'?'#d97706':color==='red'?'#dc2626':'#16a34a'
+      t.style.opacity='1'; clearTimeout(t._t)
+      t._t=setTimeout(()=>{t.style.opacity='0'},3000)
     }
 
     // ── Init ──────────────────────────────────────────────────────────────────
-    document.addEventListener('DOMContentLoaded', ()=>{
-      const today=todayStr()
+    document.addEventListener('DOMContentLoaded',()=>{
+      const today=new Date().toISOString().slice(0,10)
       selectedDate=today
       document.getElementById('date-input').value=today
       document.getElementById('day-badge').textContent=dayName(today)||'—'
-
-      // Init empty route slots
-      CREW.forEach(c=>{ routes[c.pin]={ crewPin:c.pin, crewName:c.name, date:today, stops:[], _fromServer:false } })
+      CREW.forEach(c=>{ routes[c.pin]={crewPin:c.pin,crewName:c.name,date:today,stops:[],_saved:false} })
+      updateSummary()
       renderSidebar()
-      renderCrewPanel()
-      updatePlanSummary()
-      subscribeDate(today)
+      subscribeAll(today)
       loadGM()
     })
   </script>
 
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;overflow:hidden;height:100vh;display:flex;flex-direction:column}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;overflow:hidden;height:100vh;display:flex;flex-direction:column;background:#f3f4f6}
     #dispatch-map{width:100%;height:100%}
-    .crew-block{transition:box-shadow .15s}
-    .crew-block:hover{box-shadow:0 2px 12px rgba(0,0,0,.07)}
-    #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
-           padding:10px 20px;border-radius:10px;color:#fff;font-size:13px;
-           font-weight:600;transition:opacity .3s;opacity:0;z-index:9999;pointer-events:none}
     ::-webkit-scrollbar{width:5px}
-    ::-webkit-scrollbar-track{background:#f1f1f1}
     ::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:3px}
-    select,input{font:inherit}
+    select,input,button{font:inherit}
     button{cursor:pointer}
-    .tab-bar{display:flex;border-bottom:1px solid #e5e7eb}
+    #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);padding:10px 20px;border-radius:10px;color:#fff;font-size:13px;font-weight:600;opacity:0;z-index:9999;pointer-events:none;transition:opacity .3s;white-space:nowrap}
+    @keyframes spin{to{transform:rotate(360deg)}}
   </style>
 </head>
-
-<body class="bg-gray-100">
-
-<!-- Toast -->
+<body>
 <div id="toast"></div>
 
-<!-- ── TOP NAV ─────────────────────────────────────────────────────────── -->
-<header style="background:#0d1f3a;padding:0 20px;height:52px;display:flex;align-items:center;gap:16px;flex-shrink:0;z-index:10">
-  <div style="color:#fff;font-weight:800;font-size:17px;letter-spacing:-.3px">🗺 Cornerstone Dispatch</div>
-  <div style="color:#fff4;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px">Route Builder</div>
-
+<!-- TOP NAV -->
+<header style="background:#0d1f3a;padding:0 20px;height:54px;display:flex;align-items:center;gap:14px;flex-shrink:0">
+  <div style="color:#fff;font-weight:800;font-size:16px">🗺 Cornerstone Dispatch</div>
   <div style="flex:1"></div>
-
-  <!-- Depot badge -->
-  <div style="background:rgba(255,255,255,.12);border-radius:8px;padding:5px 12px;color:#fff;font-size:12px;display:flex;align-items:center;gap:6px">
-    <span style="font-size:16px">🏠</span>
-    <div>
-      <div style="font-weight:700;font-size:11px">Depot</div>
-      <div style="opacity:.7;font-size:10px">Cornerstone Office/Yard</div>
-    </div>
+  <!-- Depot -->
+  <div style="background:rgba(255,255,255,.12);border-radius:8px;padding:5px 12px;color:#fff;font-size:11px;display:flex;align-items:center;gap:6px">
+    <span>🏠</span>
+    <div><div style="font-weight:700">Depot</div><div style="opacity:.6;font-size:10px">Cornerstone Office/Yard</div></div>
   </div>
-
-  <!-- Date picker -->
-  <div style="display:flex;align-items:center;gap:8px">
-    <input id="date-input" type="date"
-      style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);border-radius:8px;color:#fff;padding:5px 10px;font-size:13px;font-weight:600;outline:none"
-      onchange="handleDateChange(this.value)"/>
-    <div id="day-badge" style="background:rgba(255,255,255,.15);border-radius:6px;padding:4px 10px;color:#fff;font-size:12px;font-weight:700;min-width:80px;text-align:center">—</div>
-  </div>
-
+  <!-- Date -->
+  <input id="date-input" type="date"
+    style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);border-radius:8px;color:#fff;padding:5px 10px;font-size:13px;font-weight:600;outline:none"
+    onchange="handleDate(this.value)"/>
+  <div id="day-badge" style="background:rgba(255,255,255,.15);border-radius:6px;padding:4px 10px;color:#fff;font-size:12px;font-weight:700;min-width:76px;text-align:center">—</div>
   <!-- Actions -->
-  <div style="display:flex;gap:8px">
-    <button onclick="loadTemplate()" style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.2);color:#fff;padding:6px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">📋 Template</button>
-    <button onclick="optimizeAll()" style="background:#2563eb;color:#fff;padding:6px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">⚡ Optimize All</button>
-    <button onclick="saveAll()" style="background:#16a34a;color:#fff;padding:7px 18px;border-radius:8px;font-size:13px;font-weight:800;cursor:pointer">💾 Save &amp; Dispatch</button>
-    <a href="index.html" style="background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:#fff;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:600;text-decoration:none">← App</a>
-  </div>
+  <button onclick="loadTemplate()" style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);color:#fff;padding:6px 13px;border-radius:8px;font-size:12px;font-weight:700">📋 Template</button>
+  <button onclick="optimizeAll()" style="background:#2563eb;color:#fff;padding:6px 13px;border-radius:8px;font-size:12px;font-weight:700">⚡ Optimize All</button>
+  <button onclick="saveAll()" style="background:#16a34a;color:#fff;padding:7px 18px;border-radius:8px;font-size:13px;font-weight:800">💾 Save &amp; Dispatch</button>
+  <a href="index.html" style="background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:#fff;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:600;text-decoration:none">← App</a>
 </header>
 
-<!-- ── QUICK DAY BUTTONS ───────────────────────────────────────────────── -->
-<div style="background:#fff;border-bottom:1px solid #e5e7eb;padding:6px 16px;display:flex;align-items:center;gap:8px;flex-shrink:0">
-  <span style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;margin-right:4px">Quick load:</span>
-  <button onclick="loadDay('Monday')"    class="day-btn">Mon</button>
-  <button onclick="loadDay('Tuesday')"   class="day-btn">Tue</button>
-  <button onclick="loadDay('Wednesday')" class="day-btn">Wed</button>
-  <button onclick="loadDay('Thursday')"  class="day-btn">Thu</button>
-  <style>.day-btn{padding:4px 14px;border-radius:20px;background:#f3f4f6;border:none;font-size:12px;font-weight:700;color:#374151;cursor:pointer;transition:all .15s}.day-btn:hover{background:#e5e7eb}</style>
-
+<!-- DAY BAR -->
+<div style="background:#fff;border-bottom:1px solid #e5e7eb;padding:5px 16px;display:flex;align-items:center;gap:8px;flex-shrink:0">
+  <span style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px">Quick load:</span>
+  <style>.db{padding:4px 14px;border-radius:20px;background:#f3f4f6;border:none;font-size:12px;font-weight:700;color:#374151;cursor:pointer}.db:hover{background:#e5e7eb}</style>
+  <button class="db" onclick="loadDay('Monday')">Mon</button>
+  <button class="db" onclick="loadDay('Tuesday')">Tue</button>
+  <button class="db" onclick="loadDay('Wednesday')">Wed</button>
+  <button class="db" onclick="loadDay('Thursday')">Thu</button>
   <div style="flex:1"></div>
-
-  <button onclick="clearAll()" style="padding:4px 12px;border-radius:6px;background:#fee2e2;color:#dc2626;font-size:12px;font-weight:700;border:none;cursor:pointer">🗑 Clear All</button>
-
-  <!-- Legend -->
-  <div style="display:flex;gap:12px;padding-left:12px;border-left:1px solid #e5e7eb">
-    <span style="font-size:11px;font-weight:700;color:#9ca3af">CREW:</span>
+  <button onclick="clearAll()" style="padding:4px 12px;border-radius:6px;background:#fee2e2;color:#dc2626;font-size:12px;font-weight:700;border:none;cursor:pointer">🗑 Clear</button>
+  <!-- Crew legend -->
+  <div style="display:flex;gap:10px;padding-left:12px;border-left:1px solid #e5e7eb;align-items:center">
+    <span style="font-size:11px;font-weight:700;color:#9ca3af">LEGEND:</span>
     <div id="legend" style="display:flex;gap:8px"></div>
   </div>
   <script>
     document.addEventListener('DOMContentLoaded',()=>{
-      const CREW2=[
-        {name:'Neri',color:'#16a34a'},{name:'Mateos',color:'#2563eb'},
-        {name:'Erick',color:'#d97706'},{name:'Luis',color:'#7c3aed'},
-        {name:'Mario',color:'#db2877'}]
-      document.getElementById('legend').innerHTML=CREW2.map(c=>
-        `<div style="display:flex;align-items:center;gap:4px">
-          <div style="width:10px;height:10px;border-radius:50%;background:${c.color}"></div>
-          <span style="font-size:11px;font-weight:600;color:#374151">${c.name}</span>
-        </div>`).join('')
+      document.getElementById('legend').innerHTML=[
+        {n:'Neri',c:'#16a34a'},{n:'Mateos',c:'#2563eb'},
+        {n:'Erick',c:'#d97706'},{n:'Luis',c:'#7c3aed'},{n:'Mario',c:'#db2877'}
+      ].map(x=>`<div style="display:flex;align-items:center;gap:4px">
+        <div style="width:10px;height:10px;border-radius:50%;background:${x.c}"></div>
+        <span style="font-size:11px;font-weight:600;color:#374151">${x.n}</span>
+      </div>`).join('')
     })
   </script>
 </div>
 
-<!-- ── MAIN LAYOUT: Left sidebar + Map ───────────────────────────────────── -->
+<!-- MAIN: sidebar + map -->
 <div style="flex:1;display:flex;overflow:hidden;min-height:0">
 
-  <!-- LEFT SIDEBAR -->
-  <div style="width:340px;flex-shrink:0;background:#fff;border-right:1px solid #e5e7eb;display:flex;flex-direction:column;overflow:hidden">
-
+  <!-- SIDEBAR -->
+  <div style="width:330px;flex-shrink:0;background:#fff;border-right:1px solid #e5e7eb;display:flex;flex-direction:column;overflow:hidden">
     <!-- Tabs -->
-    <div class="tab-bar">
-      <button id="tab-routes" onclick="switchTab('routes')" class="flex-1 py-2 text-xs font-bold border-b-2 border-blue-600 text-blue-600 bg-white">Routes</button>
-      <button id="tab-crew"   onclick="switchTab('crew')"   class="flex-1 py-2 text-xs font-semibold text-gray-400 hover:text-gray-600 bg-white">Crew Status</button>
+    <div style="display:flex;border-bottom:1px solid #e5e7eb">
+      <button id="tab-r" onclick="switchTab('routes')"
+        class="flex-1 py-2 text-xs font-bold bg-white border-b-2 border-blue-600 text-blue-600">Routes</button>
+      <button id="tab-c" onclick="switchTab('crew')"
+        class="flex-1 py-2 text-xs font-semibold bg-white text-gray-400 hover:text-gray-600">Crew Status</button>
     </div>
 
-    <!-- Plan Summary strip -->
-    <div style="background:#f8fafc;border-bottom:1px solid #e5e7eb;padding:10px 14px;display:flex;gap:16px;flex-shrink:0">
+    <!-- Summary strip -->
+    <div style="background:#f8fafc;border-bottom:1px solid #e5e7eb;padding:10px 14px;display:flex;gap:12px;flex-shrink:0;align-items:center">
       <div style="text-align:center">
-        <div id="summary-stops" style="font-size:20px;font-weight:800;color:#0d1f3a">0</div>
+        <div id="s-stops" style="font-size:22px;font-weight:800;color:#0d1f3a;line-height:1">0</div>
         <div style="font-size:10px;color:#9ca3af;font-weight:600;text-transform:uppercase">Stops</div>
       </div>
       <div style="text-align:center">
-        <div id="summary-crews" style="font-size:20px;font-weight:800;color:#0d1f3a">0/5</div>
-        <div style="font-size:10px;color:#9ca3af;font-weight:600;text-transform:uppercase">Crews</div>
+        <div id="s-crews" style="font-size:22px;font-weight:800;color:#0d1f3a;line-height:1">0/5</div>
+        <div style="font-size:10px;color:#9ca3af;font-weight:600;text-transform:uppercase">Routes</div>
       </div>
-      <div style="text-align:center;flex:1">
-        <div id="summary-day" style="font-size:14px;font-weight:700;color:#374151">—</div>
-        <div id="summary-date" style="font-size:10px;color:#9ca3af">—</div>
+      <div style="text-align:center">
+        <div id="s-onclock" style="font-size:22px;font-weight:800;color:#16a34a;line-height:1">0</div>
+        <div style="font-size:10px;color:#9ca3af;font-weight:600;text-transform:uppercase">On Clock</div>
       </div>
-      <div style="text-align:right;font-size:10px;color:#9ca3af;line-height:1.6">
-        <div style="font-weight:600">Depot</div>
-        <div id="summary-depot" style="color:#374151;font-weight:700;font-size:11px">—</div>
+      <div style="flex:1;text-align:right">
+        <div id="s-day" style="font-size:13px;font-weight:700;color:#374151">—</div>
+        <div id="s-date" style="font-size:10px;color:#9ca3af">—</div>
       </div>
     </div>
 
-    <!-- Route list / Crew panel -->
+    <!-- Content panes -->
     <div style="flex:1;overflow-y:auto;padding:10px">
-      <div id="pane-routes">
-        <div id="route-list"></div>
-      </div>
-      <div id="pane-crew" style="display:none">
-        <div id="crew-panel"></div>
-      </div>
+      <div id="pane-routes"></div>
+      <div id="pane-crew" style="display:none"></div>
     </div>
   </div>
 
-  <!-- MAP PANEL -->
+  <!-- MAP -->
   <div style="flex:1;position:relative;overflow:hidden">
     <div id="dispatch-map" style="position:absolute;inset:0"></div>
 
-    <!-- Map overlay: legend chip -->
-    <div style="position:absolute;top:12px;left:12px;background:rgba(255,255,255,.95);border-radius:12px;padding:10px 14px;box-shadow:0 2px 12px rgba(0,0,0,.15);font-size:12px;z-index:5;pointer-events:none">
-      <div style="font-weight:700;color:#374151;margin-bottom:6px;font-size:11px;text-transform:uppercase;letter-spacing:.5px">Route Legend</div>
-      <div style="display:flex;flex-direction:column;gap:4px" id="map-legend"></div>
-      <div style="margin-top:8px;padding-top:8px;border-top:1px solid #f3f4f6;display:flex;align-items:center;gap:5px">
-        <div style="width:12px;height:12px;border-radius:50%;background:#0d1f3a"></div>
-        <span style="color:#374151;font-weight:600;font-size:11px">Depot (Start/End)</span>
-      </div>
-    </div>
-
-    <script>
-      document.addEventListener('DOMContentLoaded',()=>{
-        const CREW3=[
-          {name:'Neri',lm:'LM1',color:'#16a34a'},{name:'Mateos',lm:'LM2',color:'#2563eb'},
-          {name:'Erick',lm:'LM3',color:'#d97706'},{name:'Luis',lm:'LM4',color:'#7c3aed'},
-          {name:'Mario',lm:'LM5',color:'#db2877'}]
-        document.getElementById('map-legend').innerHTML=CREW3.map(c=>
-          `<div style="display:flex;align-items:center;gap:6px">
-            <div style="width:20px;height:4px;border-radius:2px;background:${c.color}"></div>
-            <span style="font-weight:600;color:#374151">${c.name}</span>
-            <span style="color:#9ca3af;font-size:10px">${c.lm}</span>
-          </div>`).join('')
-      })
-    </script>
-
-    <!-- Loading indicator -->
-    <div id="map-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#f9fafb;z-index:4;pointer-events:none">
+    <!-- Loading -->
+    <div id="map-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#f9fafb;z-index:4">
       <div style="text-align:center">
         <div style="width:40px;height:40px;border:3px solid #e5e7eb;border-top:3px solid #2563eb;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px"></div>
         <div style="color:#6b7280;font-size:14px;font-weight:600">Loading map…</div>
       </div>
     </div>
-    <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
-    <script>window.addEventListener('load',()=>setTimeout(()=>{const el=document.getElementById('map-loading');if(el)el.style.display='none'},8000))</script>
-    <script>const origInit=window.initGMap;window.initGMap=function(){if(origInit)origInit();const el=document.getElementById('map-loading');if(el)el.style.display='none'}</script>
+
+    <!-- Map legend overlay -->
+    <div style="position:absolute;top:10px;left:10px;background:rgba(255,255,255,.95);border-radius:12px;padding:10px 14px;box-shadow:0 2px 12px rgba(0,0,0,.15);font-size:12px;z-index:5;pointer-events:none;min-width:160px">
+      <div style="font-weight:700;color:#374151;margin-bottom:8px;font-size:11px;text-transform:uppercase;letter-spacing:.5px">Route Legend</div>
+      <div id="map-legend-items"></div>
+      <div style="margin-top:8px;padding-top:8px;border-top:1px solid #f3f4f6;display:flex;align-items:center;gap:5px">
+        <div style="width:12px;height:12px;border-radius:50%;background:#0d1f3a"></div>
+        <span style="color:#374151;font-weight:600;font-size:11px">Depot (Start)</span>
+      </div>
+      <div style="margin-top:4px;display:flex;align-items:center;gap:5px">
+        <div style="width:12px;height:12px;border-radius:50%;background:#16a34a;border:2px solid #fff;box-shadow:0 0 0 1px #16a34a"></div>
+        <span style="color:#374151;font-weight:600;font-size:11px">Live crew location</span>
+      </div>
+    </div>
+    <script>
+      document.addEventListener('DOMContentLoaded',()=>{
+        document.getElementById('map-legend-items').innerHTML=[
+          {n:'Neri',l:'LM1',c:'#16a34a'},{n:'Mateos',l:'LM2',c:'#2563eb'},
+          {n:'Erick',l:'LM3',c:'#d97706'},{n:'Luis',l:'LM4',c:'#7c3aed'},
+          {n:'Mario',l:'LM5',c:'#db2877'}
+        ].map(x=>`<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+          <div style="width:22px;height:4px;border-radius:2px;background:${x.c}"></div>
+          <span style="font-weight:600;color:#374151">${x.n}</span>
+          <span style="color:#9ca3af;font-size:10px">${x.l}</span>
+        </div>`).join('')
+      })
+    </script>
   </div>
 </div>
-
 </body>
 </html>

@@ -195,6 +195,15 @@ export function CrewDashboard({ crew, onLogout }: Props) {
     await clockOut(note)
     setClockOutBusy(false)
     setSheet('none')
+    // Auto-advance to next undone stop in today's route
+    if (activeShift && todayStops.length > 1) {
+      const justDone = activeShift.property
+      const nextStop = todayStops.find(stop =>
+        stop !== justDone &&
+        !todayShifts.some(s => s.property === stop && s.clockOut !== null)
+      )
+      if (nextStop) setSelectedProp(nextStop)
+    }
   }
 
   const isClockedIn = !!activeShift && !activeShift.clockOut
