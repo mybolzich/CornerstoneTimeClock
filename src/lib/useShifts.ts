@@ -147,6 +147,7 @@ export function useCrewShifts(pin: string) {
   // OPTIMISTIC: local shift created immediately so timer starts without waiting
   // for Firestore onSnapshot. Firestore snapshot reconciles when it arrives.
   const optimisticRef = useRef<Shift | null>(null)
+  const realDocIdRef  = useRef<string | null>(null)
 
   useEffect(() => {
     const q = query(
