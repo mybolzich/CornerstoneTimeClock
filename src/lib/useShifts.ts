@@ -219,6 +219,7 @@ export function useCrewShifts(pin: string) {
     try {
       const ref   = await addDoc(collection(db, 'timeclock_shifts'), payload)
       shiftDocId  = ref.id
+      realDocIdRef.current = ref.id   // store for clockOut before onSnapshot fires
       await dequeue(queueId)
       setClockInStatus('success')
     } catch {
@@ -259,30 +260,47 @@ export function useCrewShifts(pin: string) {
       note, durationMinutes: duration,
     }
 
-    const queueId = await enqueue('clockOut', { shiftId: activeShift.id, update })
+    // Resolve the real Firestore doc ID:
+    // - If onSnapshot already replaced the optimistic shift, use its real id
+    // - If still optimistic, use the realDocIdRef stored when addDoc resolved
+    const realId = activeShift.id.startsWith('optimistic_')
+      ? realDocIdRef.current
+      : activeShift.id
+
+    if (!realId) {
+      // Edge case: Firestore write hasn't returned yet — queue for retry
+      await enqueue('clockOut', { shiftId: '__PENDING__', update })
+      return
+    }
+
+    const queueId = await enqueue('clockOut', { shiftId: realId, update })
     try {
-      // Don't update optimistic shifts — they don't have a real Firestore ID
-      if (!activeShift.id.startsWith('optimistic_')) {
-        await updateDoc(doc(db, 'timeclock_shifts', activeShift.id), update)
-      }
+      await updateDoc(doc(db, 'timeclock_shifts', realId), update)
       await dequeue(queueId)
-    } catch { /* stays in outbox */ }
+    } catch { /* stays in outbox for retry */ }
 
     // GPS patch for clock-out
     getGpsFast().then(async gps => {
-      if (!gps || activeShift.id.startsWith('optimistic_')) return
+      if (!gps || !realId) return
       try {
-        await updateDoc(doc(db, 'timeclock_shifts', activeShift.id), {
+        await updateDoc(doc(db, 'timeclock_shifts', realId), {
           clockOutLat: gps.lat, clockOutLng: gps.lng,
         })
       } catch { /* non-critical */ }
     })
+
+    // Clear the real doc id ref after clock-out
+    realDocIdRef.current = null
   }
 
   async function startBreak(type: 'lunch' | 'rest') {
-    if (!activeShift || activeShift.id.startsWith('optimistic_')) return
+    if (!activeShift) return
+    const realId = activeShift.id.startsWith('optimistic_')
+      ? realDocIdRef.current
+      : activeShift.id
+    if (!realId) return
     await addDoc(collection(db, 'timeclock_breaks'), {
-      shiftId:    activeShift.id,
+      shiftId:    realId,
       crewName:   activeShift.crewName,
       date:       todayStr(),
       breakStart: Timestamp.now(),
@@ -298,8 +316,11 @@ export function useCrewShifts(pin: string) {
       (now.toDate().getTime() - activeBreak.breakStart.getTime()) / 60000
     )
     await updateDoc(doc(db, 'timeclock_breaks', activeBreak.id), { breakEnd: now })
-    if (!activeShift.id.startsWith('optimistic_')) {
-      await updateDoc(doc(db, 'timeclock_shifts', activeShift.id), {
+    const realId2 = activeShift.id.startsWith('optimistic_')
+      ? realDocIdRef.current
+      : activeShift.id
+    if (realId2) {
+      await updateDoc(doc(db, 'timeclock_shifts', realId2), {
         breakMinutes: activeShift.breakMinutes + breakMins,
       })
     }

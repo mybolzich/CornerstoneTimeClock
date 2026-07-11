@@ -45,7 +45,7 @@ export function RouteMap({ onClose, liveLocations }: Props) {
   const [routesFetched, setRoutesFetched] = useState(false)
 
   const dayName = getTodayName()
-  const hasRoute = ['Monday','Tuesday','Wednesday','Thursday'].includes(dayName)
+  const isRouteDay = ['Monday','Tuesday','Wednesday','Thursday'].includes(dayName)
 
   // ── Load dispatched routes from Firestore (live) ───────────────────────────
   useEffect(() => {
@@ -277,16 +277,16 @@ export function RouteMap({ onClose, liveLocations }: Props) {
 
       {/* Map */}
       <div className="relative flex-1">
-        {!hasRoute && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-100 z-10">
-            <div className="text-center text-gray-500">
-              <div className="text-3xl mb-2">📅</div>
-              <div className="font-semibold">No routes today</div>
-              <div className="text-sm">Mon – Thu only</div>
+        {/* Non-blocking weekend notice — small chip, map still loads behind it */}
+        {!isRouteDay && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+            <div className="bg-white/95 shadow-lg rounded-2xl px-4 py-2.5 text-sm text-center">
+              <div className="font-semibold text-gray-700">No scheduled routes today</div>
+              <div className="text-gray-400 text-xs mt-0.5">Live crew locations still shown · Mon–Thu routes</div>
             </div>
           </div>
         )}
-        {!gmReady && hasRoute && (
+        {!gmReady && (
           <div className="absolute inset-0 flex items-center justify-center bg-gray-100 z-10">
             <div className="text-gray-400 text-sm animate-pulse">Loading map…</div>
           </div>
@@ -352,8 +352,10 @@ export function RouteMap({ onClose, liveLocations }: Props) {
           })}
           {routesFetched && routes.length === 0 && (
             <div className="px-4 py-6 text-center text-gray-400 text-sm">
-              No routes dispatched today yet.
-              <br/>Open the Route Dispatcher to assign stops.
+              {isRouteDay
+                ? <>No routes dispatched today yet.<br/>Open the Route Dispatcher to assign stops.</>
+                : <>No scheduled routes — weekend day.<br/>Live crew locations shown on map above.</>
+              }
             </div>
           )}
         </div>
