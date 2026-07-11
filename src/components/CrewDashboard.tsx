@@ -147,7 +147,7 @@ export function CrewDashboard({ crew, onLogout }: Props) {
       Math.floor((Date.now() - activeShift.clockIn.getTime()) / 1000) - activeShift.breakMinutes * 60
     ))
     tick(); const iv = setInterval(tick, 1000); return () => clearInterval(iv)
-  }, [activeShift?.id, activeBreak])
+  }, [activeShift?.id, activeShift?.clockOut, activeBreak])
 
   useEffect(() => {
     if (!activeBreak) return
