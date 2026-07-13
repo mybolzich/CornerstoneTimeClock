@@ -158,9 +158,16 @@ export function useCrewShifts(pin: string) {
     return onSnapshot(q, snap => {
       const today  = todayStr()
       const shifts = snap.docs.map(d => fromFS(d.id, d.data())).filter(s => s.date === today)
-      optimisticRef.current = null // Firestore confirmed — clear optimistic
-      setTodayShifts(shifts)
-      setActiveShift(shifts.find(s => s.clockOut === null) ?? null)
+      // Only clear the optimistic shift if Firestore has returned real data.
+      // If Firestore fires with empty results while a clock-in is still in flight
+      // (addDoc hasn't resolved yet), preserve the optimistic shift so the
+      // CLOCK OUT button stays visible. Once Firestore confirms the real doc,
+      // this fires again with shifts.length > 0 and we swap in the real data.
+      if (shifts.length > 0 || !optimisticRef.current) {
+        optimisticRef.current = null
+        setTodayShifts(shifts)
+        setActiveShift(shifts.find(s => s.clockOut === null) ?? null)
+      }
       setLoading(false)
     }, err => {
       console.error('shifts:', err.code)
